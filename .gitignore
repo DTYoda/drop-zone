@@ -1,0 +1,4 @@
+*.o
+drop-zone
+.env
+.env.local
