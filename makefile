@@ -1,6 +1,6 @@
 # Define variables for flexibility
 CC = gcc
-CFLAGS = -Wall -g -Wextra -02
+CFLAGS = -Wall -g -Wextra
 
 # The first target is the default one when you just type 'make'
 all: drop-zone
