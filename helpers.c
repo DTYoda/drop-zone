@@ -6,6 +6,7 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <dirent.h>
 
 #define MAX_PAYLOAD_SIZE 1024
 
@@ -138,11 +139,10 @@ command_line_args extract_command_line(int argc, char *argv[])
     return args;
 }
 
-int send_all(int socket_fd, char *message)
+int send_all(int socket_fd, char *message, int length)
 {
     int bytes_sent;
     int total_bytes_sent = 0;
-    int length = strlen(message);
 
     while(length > 0)
     {
@@ -180,74 +180,3 @@ int recieve_all(int sock_fd, char *buffer)
     exit(1);
 }
 
-int open_connection(command_line_args args)
-{
-    int sock_fd;
-    struct sockaddr_in target_addr;
-
-    if((sock_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        perror("Error: Failed to open Socket");
-        exit(1);
-    }
-
-    memset(&target_addr, 0, sizeof(target_addr));
-    target_addr.sin_family = AF_INET;
-    target_addr.sin_port = htons(args.target_port);
-
-    if (inet_pton(AF_INET, args.target_IP, &target_addr.sin_addr) <= 0) {
-        perror("Invalid address or address not supported");
-        close(sock_fd);
-        exit(1);
-    }
-
-    if (connect(sock_fd, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
-        perror("Connection failed");
-        close(sock_fd);
-        exit(1);
-    }
-
-    return sock_fd;
-}
-
-void send_request(command_line_args args, int sock_fd)
-{
-    char message[MAX_PAYLOAD_SIZE];
-
-    sprintf(message,"%s\n%s\n%s\n\n", "sender_placeholder", args.directory, args.password);
-    
-    send_all(sock_fd, message);
-}
-
-void accepted_send(command_line_args args, int sock_fd)
-{
-    char buffer[MAX_PAYLOAD_SIZE];
-    recieve_all(sock_fd, buffer);
-
-
-    if(strcmp(strtok(buffer, "\n"), "1")) print_error_message("Error: Incorrect target password.");
-    if(strcmp(strtok(NULL, "\n"), args.target_IP)) print_error_message("Error: Incorrect target response (target could be compromised).");
-
-    if(strcmp(strtok(NULL, "\n"), "sender_placeholder")) print_error_message("Error: Incorrect target response (target could be compromised).");
-    if(strcmp(strtok(NULL, "\n"), args.directory)) print_error_message("Error: Incorrect target response (target could be compromised).");
-    if(strcmp(strtok(NULL, "\n"), args.password)) print_error_message("Error: Incorrect target response (target could be compromised).");
-}
-
-int send_file(command_line_args args, char *file)
-{
-    FILE *File;
-    if((File = fopen(file, "r")) == NULL)
-    {
-        perror("Error: Given file failed to open.");
-        exit(1);
-    }
-
-    int sock_fd = open_connection(args);
-
-    send_request(args, sock_fd);
-
-    accepted_send(args, sock_fd);
-    
-   return 1;
-
-}

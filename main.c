@@ -1,14 +1,15 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <getopt.h>
-#include <stdbool.h>
-#include <string.h>
-
-#include "helpers.h"
+#include "sender.h"
 
 int main(int argc, char *argv[])
 {
     command_line_args args = extract_command_line(argc, argv);
+
+    if(args.is_sender)
+    {
+        handle_send(args);
+    }
+    else
+    {
+    }
     return 0;
 }
