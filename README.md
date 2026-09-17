@@ -63,7 +63,9 @@ Useful flags, also listed in `drop-zone --help`:
 - `--no-encrypt` to skip payload encryption (refused on the relay)
 - `--verify` to hash every file as well as authenticating the chunks
 - `--force-transport=tcp\|udp\|relay` to skip the ladder
-- `--server=HOST[:PORT]` and `--config-dir=DIR` for tests (or `set-server` to keep the change)
+- `--server=HOST[:PORT]` and `--config-dir=DIR` for tests
+- `-v` / `--verbose` to show TCP/UDP/relay attempts and other connection details
+- `-q` / `--quiet` to only report problems
 
 Passwords prompted on the terminal are not echoed. Passing `-p` puts the public password in the shell history; omit it and drop-zone will ask.
 

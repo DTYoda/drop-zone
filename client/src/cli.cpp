@@ -105,6 +105,7 @@ void print_help(const char* error) {
         "      --force-transport=T  insist on one path: tcp, udp or relay. Without this,\n"
         "                           drop-zone tries all three in that order.\n"
         "      --config-dir=DIR     use a different configuration directory.\n"
+        "  -v, --verbose            show transport attempts and connection details.\n"
         "  -q, --quiet              only report problems.\n"
         "      --log-level=LEVEL    error, warn, info or debug.\n"
         "  -h, --help               print this message.\n"
@@ -154,6 +155,7 @@ CommandLine parse_command_line(int argc, char* argv[]) {
         {"output", required_argument, nullptr, 'o'},
         {"yes", no_argument, nullptr, 'y'},
         {"quiet", no_argument, nullptr, 'q'},
+        {"verbose", no_argument, nullptr, 'v'},
         {"help", no_argument, nullptr, 'h'},
         {"version", no_argument, nullptr, 'V'},
         {"no-encrypt", no_argument, nullptr, kNoEncrypt},
@@ -173,7 +175,7 @@ CommandLine parse_command_line(int argc, char* argv[]) {
     optind = option_start;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "t:p:o:yqhV", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "t:p:o:yqvhV", long_options, nullptr)) != -1) {
         switch (opt) {
             case 't':
                 parsed.target = optarg;
@@ -189,6 +191,9 @@ CommandLine parse_command_line(int argc, char* argv[]) {
                 break;
             case 'q':
                 parsed.quiet = true;
+                break;
+            case 'v':
+                parsed.verbose = true;
                 break;
             case 'h':
                 print_help(nullptr);

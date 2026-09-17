@@ -306,11 +306,14 @@ SendResult send_transfer(Channel& channel, const Manifest& manifest, const Sessi
     result.seconds = progress.elapsed_seconds();
     result.output_directory = decision.output_directory;
 
-    std::string suffix = std::string("over ") + transport_kind_name(channel.kind());
+    std::string suffix;
+    if (log::enabled(log::Level::Info)) {
+        suffix = std::string("over ") + transport_kind_name(channel.kind());
+    }
     if (options.encrypt) {
-        suffix += std::string(", ") + aead_algorithm_name(keys.algorithm);
+        suffix += (suffix.empty() ? "" : ", ") + std::string(aead_algorithm_name(keys.algorithm));
     } else {
-        suffix += ", not encrypted";
+        suffix += (suffix.empty() ? "" : ", ") + std::string("not encrypted");
     }
     progress.finish(suffix);
 

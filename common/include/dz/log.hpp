@@ -26,6 +26,11 @@ enum class Level : int {
 void set_level(Level level);
 Level level();
 
+/// True if a message at this level would actually be printed.
+inline bool enabled(Level message) {
+    return static_cast<int>(message) <= static_cast<int>(level());
+}
+
 /// Parse "error", "warn", "info" or "debug". Returns false if unrecognised.
 bool parse_level(std::string_view name, Level& out);
 
