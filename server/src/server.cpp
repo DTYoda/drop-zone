@@ -460,7 +460,10 @@ void Server::close_connection(Shard& shard, const ConnectionPtr& connection) {
     }
 
     // Tell the other half of a pairing, so a peer waiting on an introduction
-    // learns immediately instead of after a timeout.
+    // learns immediately instead of after a timeout. Direct TCP/UDP transfers
+    // never tell the server they finished, so the pairing is still live when the
+    // sender hangs up: reset a matched receiver back to idle instead of closing
+    // it with RelayClose, which would poison the next ClientHello refresh.
     if (connection->pairing_id != 0) {
         Pairing pairing;
         if (sessions_.find_pairing(connection->pairing_id, pairing)) {
@@ -469,10 +472,22 @@ void Server::close_connection(Shard& shard, const ConnectionPtr& connection) {
             ConnectionPtr other = (sender == connection) ? receiver : sender;
 
             if (other != nullptr && other != connection) {
-                static const std::string kReason = "the other peer disconnected";
-                other->enqueue_frame(MessageType::RelayClose, kReason.data(), kReason.size());
-                other->request_close(kReason);
-                wake_for(other);
+                // Direct transfers leave the receiver in ReceiverMatched with no
+                // relay. Closing them would make the next ClientHello read a
+                // RelayClose. Put them back to idle so continuous accept works.
+                const bool reset_matched_receiver =
+                    other == receiver && other->state == ConnectionState::ReceiverMatched &&
+                    !pairing.relay_active;
+
+                if (reset_matched_receiver) {
+                    other->state = ConnectionState::ReceiverIdle;
+                    other->pairing_id = 0;
+                } else {
+                    static const std::string kReason = "the other peer disconnected";
+                    other->enqueue_frame(MessageType::RelayClose, kReason.data(), kReason.size());
+                    other->request_close(kReason);
+                    wake_for(other);
+                }
             }
         }
         sessions_.destroy_pairing(connection->pairing_id);
