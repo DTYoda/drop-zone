@@ -4,7 +4,7 @@ Send files straight to another person's terminal, wherever they are.
 
 A receiver runs `drop-zone accept`. A sender runs `drop-zone send report.pdf -t alice`. The two machines find each other through a rendezvous server that never sees a password, a filename or a file byte, then transfer the data on the best path they can open: a direct TCP connection, a hole-punched UDP stream, or — only if both of those fail — a relay of ciphertext through the server.
 
-This tree is a C++20 rewrite of the original C prototype. The client is meant to be Homebrew-installable; the server is a separate, storage-free daemon an operator runs.
+The client is C++20 and meant to be Homebrew-installable; the server is a separate, storage-free daemon an operator runs.
 
 ## What you get
 
