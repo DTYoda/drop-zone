@@ -36,26 +36,25 @@ These are the usual blockers for Homebrew, AUR, Nix, and Debian:
    ./packaging/homebrew/fill-stable.sh vX.Y.Z
    ```
 5. Paste the printed `url` and `sha256` into `packaging/homebrew/drop-zone.rb`,
-   replacing the commented stable stanza.
+   then copy that file to `Formula/drop-zone.rb` in
+   [DTYoda/homebrew-tap](https://github.com/DTYoda/homebrew-tap).
 
 ## Homebrew
 
-Until a tag exists, the in-tree formula is HEAD-only:
-
-```sh
-brew install --HEAD ./packaging/homebrew/drop-zone.rb
-```
-
-After the first tag, copy the formula into a personal tap so users can type:
+The client is on a personal tap:
 
 ```sh
 brew tap DTYoda/tap
 brew install drop-zone
 ```
 
-A tap is a repo named `homebrew-tap` with `Formula/drop-zone.rb`. Homebrew-core
-is the next step: it needs a few clean tagged releases, `brew audit --new`, and
-`brew test drop-zone`. See https://docs.brew.sh/How-To-Open-a-Homebrew-Pull-Request.
+The tap is [DTYoda/homebrew-tap](https://github.com/DTYoda/homebrew-tap)
+(`Formula/drop-zone.rb`). Keep that file in lockstep with
+`packaging/homebrew/drop-zone.rb` in this repo.
+
+Homebrew-core is the next step: it needs a few clean tagged releases,
+`brew audit --new`, and `brew test drop-zone`. See
+https://docs.brew.sh/How-To-Open-a-Homebrew-Pull-Request.
 
 Do not submit a formula whose `url` points at `branch: "main"`. Core and
 BrewTestBot require a checksummed archive.

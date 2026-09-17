@@ -47,16 +47,23 @@ jobs:
         run: |
           notes="$(mktemp)"
           cat > "$notes" <<EOF
-          Source archive for packagers:
+          ## Install
+
+          \`\`\`sh
+          brew tap DTYoda/tap
+          brew install drop-zone
+          \`\`\`
+
+          ## Source archive for packagers
 
           \`\`\`
           url "${{ steps.tarball.outputs.url }}"
           sha256 "${{ steps.tarball.outputs.sha256 }}"
           \`\`\`
 
-          Paste those two lines into \`packaging/homebrew/drop-zone.rb\` (or run
-          \`packaging/homebrew/fill-stable.sh ${{ github.ref_name }}\`) before
-          copying the formula into a tap or submitting it to homebrew-core.
+          Paste those two lines into \`packaging/homebrew/drop-zone.rb\` and
+          \`Formula/drop-zone.rb\` in [DTYoda/homebrew-tap](https://github.com/DTYoda/homebrew-tap)
+          (or run \`packaging/homebrew/fill-stable.sh ${{ github.ref_name }}\`).
           EOF
           gh release create "${GITHUB_REF_NAME}" \
             --title "drop-zone ${GITHUB_REF_NAME#v}" \
