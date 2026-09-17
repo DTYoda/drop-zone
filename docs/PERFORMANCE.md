@@ -107,29 +107,49 @@ Copies that were removed on the hot path:
 
 ## Loopback measurements
 
-Machine: recorded by the cloud builder that produced this tree. Loopback
-only; `DROP_ZONE_ALLOW_LOOPBACK=1`. Payload is `/dev/urandom` so the AEAD
-is not compressing zeros.
+Machine: 4-core Intel Xeon (AES-NI, PCLMULQDQ, AVX2, VAES) running the
+Release build of drop-zone 1.0.0. Loopback only;
+`DROP_ZONE_ALLOW_LOOPBACK=1`. Payload is `/dev/urandom` so the AEAD is
+not compressing zeros. Checksums matched on every run.
 
-| Path | Encryption | Size | Throughput | Notes |
-| --- | --- | --- | --- | --- |
-| direct TCP | AES-256-GCM | 64 MiB | *(filled by e2e)* | |
-| direct TCP | none (sendfile) | 64 MiB | *(filled by e2e)* | |
-| hole-punched UDP | AES-256-GCM | 64 MiB | *(filled by e2e)* | |
-| hole-punched UDP | none | 64 MiB | *(filled by e2e)* | |
-| server relay | AES-256-GCM | 64 MiB | *(filled by e2e)* | |
-| auto ladder | AES-256-GCM | 64 MiB | *(filled by e2e)* | should pick TCP on loopback |
+64 MiB, `tests/e2e_loopback.sh build 64` (13/13 passed):
 
-A multi-GiB run per tier is in the verification notes below the table
-once `tests/e2e_loopback.sh build <size>` has been run at a larger size.
+| Path | Encryption | Throughput |
+| --- | --- | --- |
+| direct TCP | AES-256-GCM | 744 MiB/s |
+| direct TCP | none (`sendfile`) | 688 MiB/s |
+| hole-punched UDP | AES-256-GCM | 256 MiB/s |
+| hole-punched UDP | none | 225 MiB/s |
+| server relay | AES-256-GCM | 696 MiB/s |
+| auto ladder | AES-256-GCM | 711 MiB/s (picked direct TCP) |
+
+2 GiB per tier, same machine, SHA-256 of source and destination agreed:
+
+| Path | Encryption | Throughput |
+| --- | --- | --- |
+| direct TCP | AES-256-GCM | 1.0 GiB/s |
+| direct TCP | none (`sendfile`) | 939 MiB/s |
+| hole-punched UDP | AES-256-GCM | 112 MiB/s |
+| hole-punched UDP | none | 44 MiB/s |
+| server relay | AES-256-GCM | 1.1 GiB/s |
+
+The 64 MiB UDP figures are the transport's own ceiling on this host: the
+window fills once and the transfer is over. A multi-gigabyte run spends
+most of its time in steady state against Linux's ~208 KiB UDP socket
+buffer, which is why those numbers drop. TCP and the relay are ordinary
+streams and hold around 1 GiB/s.
+
+Plaintext TCP is not faster than encrypted TCP here. `sendfile` removes a
+copy, but AES-256-GCM on this CPU is faster than the loopback socket, so
+the extra copies of the encrypted path are hidden and the worker pool
+can keep the socket full. On a machine without AES the ranking reverses;
+`drop-zone status` reports which cipher this CPU will use.
 
 To reproduce:
 
 ```sh
 make
 ./tests/e2e_loopback.sh build 64
-./tests/e2e_loopback.sh build 2048    # multi-GiB, several minutes
+# 2 GiB per tier is the same script with a larger payload, or a one-off
+# send/accept pair with DROP_ZONE_ALLOW_LOOPBACK=1.
 ```
-
-`drop-zone status` prints the cipher this CPU will use and whether
-`sendfile` is available.
