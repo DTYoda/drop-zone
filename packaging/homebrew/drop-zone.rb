@@ -9,34 +9,30 @@
 # bottle built on a machine with VAES still runs on one without, and still takes
 # the AES path where the hardware has it.
 #
-# Until the first git tag exists this formula is HEAD-only:
-#
-#   brew install --HEAD ./packaging/homebrew/drop-zone.rb
-#
-# After tagging vX.Y.Z, run packaging/homebrew/fill-stable.sh and paste the
-# printed `url` / `sha256` below so the formula can be copied into a tap or
-# submitted to homebrew-core.
+# This file is the copy kept next to the source. The installable tap lives at
+# https://github.com/DTYoda/homebrew-tap (brew tap DTYoda/tap). After tagging
+# a release, run packaging/homebrew/fill-stable.sh and paste url/sha256 here,
+# then copy this file to Formula/drop-zone.rb in that tap.
 
 class DropZone < Formula
   desc "Peer-to-peer terminal file transfer"
   homepage "https://github.com/DTYoda/drop-zone"
+  url "https://github.com/DTYoda/drop-zone/archive/refs/tags/v1.0.0.tar.gz"
+  sha256 "397a833fe68ee88a550f1dc5679a484f0554bfdc225a2a810931d9f54b0f5337"
   license "MIT"
   head "https://github.com/DTYoda/drop-zone.git", branch: "main"
 
-  # Stable source, filled in after the first release tag:
-  # url "https://github.com/DTYoda/drop-zone/archive/refs/tags/v1.0.0.tar.gz"
-  # sha256 "REPLACE_WITH_SHA256"
-  # livecheck do
-  #   url :stable
-  #   strategy :github_latest
-  # end
+  livecheck do
+    url :stable
+    strategy :github_latest
+  end
 
   depends_on "cmake" => :build
   depends_on "pkgconf" => :build
   depends_on "openssl@3"
 
   def install
-    args = %W[
+    args = %w[
       -DDZ_BUILD_CLIENT=ON
       -DDZ_BUILD_SERVER=OFF
       -DDZ_BUILD_TESTS=OFF

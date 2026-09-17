@@ -28,13 +28,12 @@ Needs a C++20 compiler, CMake 3.16+, and OpenSSL 1.1.1+ (3.x is fine). On Debian
 
 ### Homebrew
 
-Until the first tagged release, the in-tree formula is HEAD-only and still builds with `-DDZ_BUILD_SERVER=OFF`, so `brew install` never places the daemon on a user's machine:
-
 ```sh
-brew install --HEAD ./packaging/homebrew/drop-zone.rb
+brew tap DTYoda/tap
+brew install drop-zone
 ```
 
-After a `v*` tag, copy `packaging/homebrew/drop-zone.rb` into a tap (see [packaging/README.md](packaging/README.md)) so installs become `brew tap DTYoda/tap && brew install drop-zone`.
+Or in one step: `brew install DTYoda/tap/drop-zone`. The formula builds with `-DDZ_BUILD_SERVER=OFF`, so a `brew install` never places the daemon on a user's machine. To follow `main` instead of the latest tag: `brew install --HEAD DTYoda/tap/drop-zone`.
 
 ### First run
 
