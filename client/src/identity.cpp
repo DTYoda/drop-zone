@@ -19,7 +19,12 @@ namespace {
 
 /// Version byte at the front of identity.key, so a future format change can be
 /// recognised rather than mis-parsed.
-constexpr std::uint8_t kKeystoreVersion = 1;
+///
+/// v1 sealed only the Ed25519 private key. v2 seals that key plus the public
+/// password, so `accept` does not have to ask for it again. New files are
+/// written as v2; v1 still unlocks, with an empty public password.
+constexpr std::uint8_t kKeystoreVersionV1 = 1;
+constexpr std::uint8_t kKeystoreVersion = 2;
 
 /// Stretch the private password into the key that seals the identity.
 Key derive_keystore_key(std::string_view private_password, const std::uint8_t* salt) {
@@ -80,17 +85,29 @@ std::string fingerprint_of(const std::uint8_t public_key[kEd25519PublicKeySize])
 
 bool identity_exists(const Config& config) { return is_regular_file(config.identity_path()); }
 
-Identity create_identity(const Config& config, std::string_view private_password) {
-    Identity identity;
-    identity.keys = ed25519_generate();
+void save_identity(const Config& config, const Identity& identity,
+                   std::string_view private_password) {
+    if (identity.public_password.size() > 0xffff) {
+        fail("the public password is too long to store");
+    }
 
     Key keystore_key = derive_keystore_key(private_password, config.keystore_salt);
 
-    // Only the private half is sealed; the public half is recomputed from it on
-    // unlock, so the two can never disagree.
-    std::vector<std::uint8_t> sealed = seal_standalone(
-        preferred_aead(), keystore_key, kKeystoreAad, identity.keys.secret.data(),
-        identity.keys.secret.size());
+    // Only the private half of the identity is sealed; the public half is
+    // recomputed from it on unlock, so the two can never disagree. The public
+    // password rides in the same AEAD so it is not sitting in config.toml.
+    SecretBytes plain(kEd25519PrivateKeySize + 2 + identity.public_password.size());
+    std::memcpy(plain.data(), identity.keys.secret.data(), kEd25519PrivateKeySize);
+    auto length = static_cast<std::uint16_t>(identity.public_password.size());
+    plain[kEd25519PrivateKeySize] = static_cast<std::uint8_t>(length >> 8);
+    plain[kEd25519PrivateKeySize + 1] = static_cast<std::uint8_t>(length & 0xff);
+    if (length != 0) {
+        std::memcpy(plain.data() + kEd25519PrivateKeySize + 2, identity.public_password.data(),
+                    length);
+    }
+
+    std::vector<std::uint8_t> sealed =
+        seal_standalone(preferred_aead(), keystore_key, kKeystoreAad, plain.data(), plain.size());
 
     std::vector<std::uint8_t> file;
     file.push_back(kKeystoreVersion);
@@ -98,6 +115,14 @@ Identity create_identity(const Config& config, std::string_view private_password
     file.insert(file.end(), sealed.begin(), sealed.end());
 
     write_sealed_file(config.identity_path(), file);
+}
+
+Identity create_identity(const Config& config, std::string_view private_password,
+                         std::string_view public_password) {
+    Identity identity;
+    identity.keys = ed25519_generate();
+    identity.public_password.assign(public_password.begin(), public_password.end());
+    save_identity(config, identity, private_password);
     return identity;
 }
 
@@ -105,7 +130,7 @@ Identity unlock_identity(const Config& config, std::string_view private_password
     std::vector<std::uint8_t> file = read_file_bytes(config.identity_path());
 
     if (file.size() < 2) fail("identity.key is truncated");
-    if (file[0] != kKeystoreVersion) {
+    if (file[0] != kKeystoreVersion && file[0] != kKeystoreVersionV1) {
         fail("identity.key was written by a different version of drop-zone");
     }
 
@@ -123,10 +148,26 @@ Identity unlock_identity(const Config& config, std::string_view private_password
         // knows whether they modified it and only the password is worth guessing.
         fail_user("that private password does not unlock this identity");
     }
-    if (secret.size() != kEd25519PrivateKeySize) fail("identity.key holds a malformed key");
 
     Identity identity;
-    std::memcpy(identity.keys.secret.data(), secret.data(), secret.size());
+    if (file[0] == kKeystoreVersionV1) {
+        if (secret.size() != kEd25519PrivateKeySize) fail("identity.key holds a malformed key");
+        std::memcpy(identity.keys.secret.data(), secret.data(), secret.size());
+    } else {
+        if (secret.size() < kEd25519PrivateKeySize + 2) {
+            fail("identity.key holds a malformed key");
+        }
+        std::uint16_t length = static_cast<std::uint16_t>(
+            (static_cast<unsigned>(secret[kEd25519PrivateKeySize]) << 8) |
+            secret[kEd25519PrivateKeySize + 1]);
+        if (secret.size() != kEd25519PrivateKeySize + 2 + length) {
+            fail("identity.key holds a malformed key");
+        }
+        std::memcpy(identity.keys.secret.data(), secret.data(), kEd25519PrivateKeySize);
+        identity.public_password.assign(
+            reinterpret_cast<const char*>(secret.data() + kEd25519PrivateKeySize + 2), length);
+    }
+
     ed25519_public_from_secret(identity.keys.secret, identity.keys.public_key);
     return identity;
 }

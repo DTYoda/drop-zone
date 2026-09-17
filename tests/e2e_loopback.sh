@@ -76,7 +76,6 @@ setup_client() {
     local home="$1" username="$2" private="$3" public="$4"
     DROP_ZONE_HOME="$home" "$CLIENT" setup --server="127.0.0.1:$PORT" >/dev/null 2>&1 <<EOF
 $username
-
 $private
 $private
 $public
@@ -120,7 +119,6 @@ run_transfer() {
         --force-transport="$transport" $encrypt_flag --log-level debug \
         > "$receiver_log" 2>&1 <<EOF &
 $BOB_PRIVATE
-$BOB_PUBLIC
 EOF
     local receiver_pid=$!
     sleep 1.5
@@ -216,7 +214,6 @@ mkdir -p "$out"
 DROP_ZONE_HOME="$WORK/bob" "$CLIENT" accept --once -y -o "$out" --force-transport=tcp \
     > "$WORK/receiver-wrong.log" 2>&1 <<EOF &
 $BOB_PRIVATE
-$BOB_PUBLIC
 EOF
 receiver_pid=$!
 sleep 1.5
@@ -243,7 +240,6 @@ mkdir -p "$out"
 DROP_ZONE_HOME="$WORK/bob" "$CLIENT" accept --once -y -o "$out" --force-transport=relay \
     --no-encrypt > "$WORK/receiver-plain-relay.log" 2>&1 <<EOF &
 $BOB_PRIVATE
-$BOB_PUBLIC
 EOF
 receiver_pid=$!
 sleep 1.5

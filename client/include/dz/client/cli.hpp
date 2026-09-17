@@ -24,7 +24,9 @@ enum class Command {
     Send,       ///< Send files to a username.
     WhoAmI,     ///< Print this installation's username and fingerprint.
     Status,     ///< Print the configuration and what this build can do.
-    SetServer,  ///< Permanently change the rendezvous server in the config.
+    SetServer,          ///< Permanently change the rendezvous server in the config.
+    SetOutput,          ///< Permanently change the default directory for received files.
+    SetPublicPassword,  ///< Permanently change the public password senders use.
     Help,
     Version,
 };
@@ -38,8 +40,9 @@ struct CommandLine {
     /// Username to send to.
     std::string target;
 
-    /// The target's public password. Left empty on the command line prompts for
-    /// it, which keeps it out of the shell history and out of `ps` output.
+    /// Public password from `-p`. On send this is the target's, and an empty
+    /// value prompts. On accept it overrides the stored public password for
+    /// this run only; empty means use the one sealed at setup.
     std::string public_password;
 
     /// Where received files go. Empty means the configured default, and failing

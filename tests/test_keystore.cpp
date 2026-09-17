@@ -18,6 +18,7 @@
 #include "dz/crypto.hpp"
 #include "dz/error.hpp"
 #include "dz/fileio.hpp"
+#include "dz/protocol.hpp"
 #include "harness.hpp"
 
 using namespace dz;
@@ -88,6 +89,60 @@ DZ_TEST(an_identity_unlocks_with_the_right_password) {
     std::uint8_t signature[kEd25519SignatureSize];
     ed25519_sign(unlocked.keys.secret, message.data(), message.size(), signature);
     DZ_CHECK(ed25519_verify(created.keys.public_key, message.data(), message.size(), signature));
+}
+
+DZ_TEST(the_public_password_round_trips_inside_the_keystore) {
+    TemporaryDirectory directory;
+    Config config = make_config(directory.path());
+    save_config(config);
+
+    Identity created = create_identity(config, "the-private-password", "the-public-password");
+    Identity unlocked = unlock_identity(config, "the-private-password");
+
+    DZ_CHECK_EQUAL(unlocked.fingerprint(), created.fingerprint());
+    DZ_CHECK_EQUAL(std::string(unlocked.public_password.data(), unlocked.public_password.size()),
+                   std::string("the-public-password"));
+}
+
+DZ_TEST(changing_the_public_password_keeps_the_identity) {
+    TemporaryDirectory directory;
+    Config config = make_config(directory.path());
+    save_config(config);
+
+    Identity created = create_identity(config, "the-private-password", "old-public-password");
+    created.public_password.assign("new-public-password");
+    save_identity(config, created, "the-private-password");
+
+    Identity unlocked = unlock_identity(config, "the-private-password");
+    DZ_CHECK_EQUAL(unlocked.fingerprint(), created.fingerprint());
+    DZ_CHECK_EQUAL(std::string(unlocked.public_password.data(), unlocked.public_password.size()),
+                   std::string("new-public-password"));
+}
+
+DZ_TEST(a_v1_keystore_unlocks_without_a_public_password) {
+    TemporaryDirectory directory;
+    Config config = make_config(directory.path());
+    save_config(config);
+
+    Identity created = create_identity(config, "password", "stored-public");
+
+    Key keystore_key;
+    scrypt_derive("password", config.keystore_salt, kKeystoreSaltSize, ScryptParams{},
+                  keystore_key.data(), keystore_key.size());
+    std::vector<std::uint8_t> sealed =
+        seal_standalone(preferred_aead(), keystore_key, kKeystoreAad, created.keys.secret.data(),
+                        kEd25519PrivateKeySize);
+
+    std::FILE* file = std::fopen(config.identity_path().c_str(), "wb");
+    DZ_CHECK(file != nullptr);
+    unsigned char header[2] = {1, static_cast<unsigned char>(preferred_aead())};
+    std::fwrite(header, 1, 2, file);
+    std::fwrite(sealed.data(), 1, sealed.size(), file);
+    std::fclose(file);
+
+    Identity unlocked = unlock_identity(config, "password");
+    DZ_CHECK_EQUAL(unlocked.fingerprint(), created.fingerprint());
+    DZ_CHECK(unlocked.public_password.empty());
 }
 
 DZ_TEST(an_identity_does_not_unlock_with_the_wrong_password) {
@@ -165,9 +220,9 @@ DZ_TEST(the_config_round_trips) {
     DZ_CHECK_EQUAL(loaded.prompt_before_accepting, false);
     DZ_CHECK(std::memcmp(loaded.keystore_salt, config.keystore_salt, kKeystoreSaltSize) == 0);
 
-    // The public password is not in the file at all: the client is the side that
-    // already knows it, and storing it would make reading config.toml enough to
-    // receive files as this user.
+    // The public password is not in the file at all: it is sealed inside
+    // identity.key under the private password, so reading config.toml is not
+    // enough to receive files as this user.
     std::string contents;
     {
         std::FILE* file = std::fopen(loaded.config_path().c_str(), "rb");

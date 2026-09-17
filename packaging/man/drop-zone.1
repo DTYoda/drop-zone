@@ -33,6 +33,12 @@ is given.
 .B accept
 Wait for incoming files and save them. Prompts before each transfer unless
 .B \-y
+is given. Files land in the current directory unless
+.B \-o
+is given or a default was set with
+.BR set-output .
+Uses the public password chosen at setup unless
+.B \-p
 is given.
 .TP
 .B send
@@ -48,6 +54,22 @@ Print this machine's username and identity fingerprint.
 .B status
 Print the configuration and what this build can do, including which AEAD the
 CPU will use.
+.TP
+.B set-output
+.I DIR
+Permanently change where received files are saved.
+.I DIR
+of
+.B .
+or
+.B ./
+means the directory
+.B accept
+is run from.
+.TP
+.B set-public-password
+Permanently change the public password senders must know. Asks for the
+private password, then the new public password twice.
 .TP
 .B set-server
 .I HOST[:PORT]
@@ -66,7 +88,11 @@ shell history.
 .SS Accept options
 .TP
 .BR \-o ", " \-\-output = DIR
-Directory to save files in. Default: the directory the command was run from.
+Directory to save files in for this run only. Default: the configured
+output directory, or the directory the command was run from.
+.TP
+.BR \-p ", " \-\-password = PASSWORD
+Public password for this run only. Default: the one chosen at setup.
 .TP
 .BR \-y ", " \-\-yes
 Accept every transfer without asking.
@@ -129,7 +155,8 @@ Print the version.
 Username, server address, preferences. No secrets. Mode 0600.
 .TP
 .I $XDG_CONFIG_HOME/drop-zone/identity.key
-Ed25519 identity, sealed under the private password. Mode 0600.
+Ed25519 identity and public password, sealed under the private password.
+Mode 0600.
 .TP
 .I $XDG_CONFIG_HOME/drop-zone/known_peers
 Trust-on-first-use pins, one username per line.

@@ -140,9 +140,17 @@ tells an attacker the username and the server, not how to receive as this
 user.
 
 `identity.key` is version byte + algorithm tag + AEAD of the Ed25519
-private key, associated data `"drop-zone/v1 identity keystore"`. Created
-0600, written to a temporary and renamed, fsync'd before the rename. The
-public half is recomputed on unlock so the two cannot disagree.
+private key and (from v2) the public password, associated data
+`"drop-zone/v1 identity keystore"`. Created 0600, written to a temporary
+and renamed, fsync'd before the rename. The public half of the identity is
+recomputed on unlock so the two cannot disagree. v1 files, which sealed
+only the identity key, still unlock; the first `accept` then stores the
+typed public password and rewrites the file as v2.
+
+Sealing the public password next to the identity key is what lets `accept`
+reuse it. An attacker who can unlock the keystore therefore also learns
+it. That is the same bar as using the identity: the private password, not
+the files on disk by themselves.
 
 `known_peers` is line-based and human-readable, like `known_hosts`. Treat a
 changed pin as you would an SSH host-key warning.

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <exception>
 #include <string>
+#include <utility>
 
 #include "dz/client/cli.hpp"
 #include "dz/client/config.hpp"
@@ -102,8 +103,9 @@ int command_setup(const CommandLine& args) {
         config.server_port = kDefaultServerPort;
     }
 
-    std::string output = read_line("Save received files in [the current directory]: ", "");
-    config.default_output_directory = output.empty() ? "" : expand_user_path(output);
+    // Received files land in the directory `accept` is run from unless the user
+    // later runs `drop-zone set-output` or passes `-o` for a single run.
+    config.default_output_directory = "";
 
     // Random per installation, so two people who pick the same private password do
     // not end up with the same key sealing their identity files.
@@ -129,7 +131,8 @@ int command_setup(const CommandLine& args) {
 
     save_config(config);
     Identity identity =
-        create_identity(config, std::string_view(private_password.data(), private_password.size()));
+        create_identity(config, std::string_view(private_password.data(), private_password.size()),
+                        std::string_view(public_password.data(), public_password.size()));
 
     std::fprintf(stderr,
                  "\nDone.\n"
@@ -143,8 +146,12 @@ int command_setup(const CommandLine& args) {
                  "how they can confirm it is really you -- read it out to them once and\n"
                  "drop-zone will check it on every transfer from then on.\n"
                  "\n"
-                 "Now run `drop-zone accept` to start receiving. To use a different\n"
-                 "rendezvous server later, run `drop-zone set-server HOST[:PORT]`.\n",
+                 "Now run `drop-zone accept` to start receiving. Files land in the directory\n"
+                 "you run that from; change the default with `drop-zone set-output DIR`, or\n"
+                 "pass `-o DIR` on a single accept. The public password is remembered from\n"
+                 "setup; change it with `drop-zone set-public-password`, or pass `-p` on a\n"
+                 "single accept. To use a different rendezvous server later, run\n"
+                 "`drop-zone set-server HOST[:PORT]`.\n",
                  config.username.c_str(), config.server_host.c_str(),
                  static_cast<unsigned>(config.server_port), identity.fingerprint().c_str(),
                  config.config_path().c_str());
@@ -199,7 +206,7 @@ int command_status(const CommandLine& args) {
     std::printf("  server                %s:%u\n", config.server_host.c_str(),
                 static_cast<unsigned>(config.server_port));
     std::printf("  output directory      %s\n", config.default_output_directory.empty()
-                                                    ? "(wherever you run the command)"
+                                                    ? "./ (wherever you run the command)"
                                                     : config.default_output_directory.c_str());
     std::printf("  encrypt by default    %s\n", config.encrypt_by_default ? "yes" : "no");
     std::printf("  verify digests        %s\n", config.verify_digests ? "yes" : "no");
@@ -231,6 +238,66 @@ int command_set_server(const CommandLine& args) {
 
     std::fprintf(stderr, "Rendezvous server is now %s:%u\n", config.server_host.c_str(),
                  static_cast<unsigned>(config.server_port));
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// set-output
+// ---------------------------------------------------------------------------
+
+/// Empty, `.` and `./` all mean "the directory accept is run from". Anything
+/// else is stored as an absolute path so the default does not silently follow
+/// later working-directory changes.
+std::string resolve_configured_output_directory(const std::string& requested) {
+    std::string path = expand_user_path(requested);
+    if (path.empty() || path == "." || path == "./") return "";
+    if (path.front() == '/') return path;
+    return join_path(current_directory(), path);
+}
+
+int command_set_output(const CommandLine& args) {
+    Config config = load_config(resolve_config_directory(args));
+
+    config.default_output_directory = resolve_configured_output_directory(args.output_directory);
+    save_config(config);
+
+    if (config.default_output_directory.empty()) {
+        std::fprintf(stderr, "Received files will now be saved in ./ (the directory you run "
+                             "`accept` from)\n");
+    } else {
+        std::fprintf(stderr, "Received files will now be saved in %s\n",
+                     config.default_output_directory.c_str());
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// set-public-password
+// ---------------------------------------------------------------------------
+
+int command_set_public_password(const CommandLine& args) {
+    Config config = load_config(resolve_config_directory(args));
+
+    SecretString private_password = read_password("Private password: ");
+    Identity identity = unlock_identity(
+        config, std::string_view(private_password.data(), private_password.size()));
+
+    SecretString public_password =
+        read_password_twice("New public password (what senders will need): ",
+                            "Confirm public password: ");
+
+    if (public_password.size() < 12) {
+        std::fprintf(stderr,
+                     "\nNote: that public password is short. Anybody who intercepts one of\n"
+                     "your transfers can attack it offline, so a longer passphrase is worth\n"
+                     "the extra typing.\n");
+    }
+
+    identity.public_password = std::move(public_password);
+    save_identity(config, identity,
+                  std::string_view(private_password.data(), private_password.size()));
+
+    std::fprintf(stderr, "Public password updated. Tell senders the new one.\n");
     return 0;
 }
 
@@ -323,8 +390,18 @@ int command_accept(const CommandLine& args) {
     Identity identity = unlock_identity(
         config, std::string_view(private_password.data(), private_password.size()));
 
-    SecretString public_password =
-        read_password("Your public password (what senders will need): ");
+    SecretString public_password;
+    if (!args.public_password.empty()) {
+        public_password.assign(args.public_password.begin(), args.public_password.end());
+    } else if (!identity.public_password.empty()) {
+        public_password = identity.public_password;
+    } else {
+        // v1 keystore, or setup ran before public passwords were stored.
+        public_password = read_password("Your public password (what senders will need): ");
+        identity.public_password = public_password;
+        save_identity(config, identity,
+                      std::string_view(private_password.data(), private_password.size()));
+    }
 
     // Stretched once here, not per incoming request. scrypt takes about a tenth of
     // a second, so doing it per request would let anybody pin this machine's CPU
@@ -443,6 +520,8 @@ int run(int argc, char* argv[]) {
         case Command::WhoAmI: return command_whoami(args);
         case Command::Status: return command_status(args);
         case Command::SetServer: return command_set_server(args);
+        case Command::SetOutput: return command_set_output(args);
+        case Command::SetPublicPassword: return command_set_public_password(args);
         case Command::Version:
             std::printf("drop-zone %s\n", DZ_VERSION_STRING);
             return 0;

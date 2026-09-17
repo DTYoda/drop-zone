@@ -32,6 +32,8 @@ Command parse_command(const char* text) {
     if (std::strcmp(text, "whoami") == 0) return Command::WhoAmI;
     if (std::strcmp(text, "status") == 0) return Command::Status;
     if (std::strcmp(text, "set-server") == 0) return Command::SetServer;
+    if (std::strcmp(text, "set-output") == 0) return Command::SetOutput;
+    if (std::strcmp(text, "set-public-password") == 0) return Command::SetPublicPassword;
     if (std::strcmp(text, "help") == 0) return Command::Help;
     if (std::strcmp(text, "version") == 0) return Command::Version;
     return Command::None;
@@ -81,6 +83,9 @@ void print_help(const char* error) {
         "  whoami                   print this machine's username and fingerprint.\n"
         "  status                   print the configuration and what this build can do.\n"
         "  set-server HOST[:PORT]   permanently change the rendezvous server.\n"
+        "  set-output DIR           permanently change where received files are saved.\n"
+        "                           DIR of . or ./ means the directory you run accept from.\n"
+        "  set-public-password      permanently change the public password senders use.\n"
         "\n"
         "Send options:\n"
         "  -t, --target=USER        username to send to.\n"
@@ -88,8 +93,10 @@ void print_help(const char* error) {
         "                           ask, which keeps it out of your shell history.\n"
         "\n"
         "Accept options:\n"
-        "  -o, --output=DIR         directory to save files in (default: the directory\n"
-        "                           you ran the command from).\n"
+        "  -o, --output=DIR         save files here for this run only (default: the\n"
+        "                           configured output directory, or ./).\n"
+        "  -p, --password=PASSWORD  public password for this run only (default: the one\n"
+        "                           chosen at setup).\n"
         "  -y, --yes                accept every transfer without asking.\n"
         "      --once               accept one transfer, then exit.\n"
         "\n"
@@ -117,9 +124,12 @@ void print_help(const char* error) {
         "\n"
         "Examples:\n"
         "  drop-zone setup\n"
+        "  drop-zone accept\n"
         "  drop-zone accept -o ~/Downloads\n"
         "  drop-zone send report.pdf -t alice\n"
         "  drop-zone send ./photos -t bob -p hunter2\n"
+        "  drop-zone set-output ~/Downloads\n"
+        "  drop-zone set-public-password\n"
         "  drop-zone set-server 192.0.2.10\n");
 
     std::exit((error != nullptr) ? 1 : 0);
@@ -266,6 +276,19 @@ CommandLine parse_command_line(int argc, char* argv[]) {
             parse_server(parsed.inputs[0].c_str(), parsed.server_host, parsed.server_port);
             if (parsed.server_host.empty()) {
                 print_help("`set-server` needs HOST or HOST:PORT");
+            }
+            break;
+
+        case Command::SetOutput:
+            if (parsed.inputs.size() != 1) {
+                print_help("`set-output` needs a directory");
+            }
+            parsed.output_directory = parsed.inputs[0];
+            break;
+
+        case Command::SetPublicPassword:
+            if (!parsed.inputs.empty()) {
+                print_help("`set-public-password` takes no arguments; it will ask");
             }
             break;
 
