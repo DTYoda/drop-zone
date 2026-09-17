@@ -115,6 +115,7 @@ std::vector<std::uint8_t> SendRequest::encode() const {
     PayloadWriter writer;
     writer.put_string(target_username);
     writer.put_bytes(proof, sizeof(proof));
+    writer.put_bytes(signature, sizeof(signature));
     writer.put_u8(static_cast<std::uint8_t>(transport_hint));
     return writer.take();
 }
@@ -128,6 +129,7 @@ SendRequest SendRequest::decode(const std::vector<std::uint8_t>& payload) {
         fail("SendRequest names an invalid username");
     }
     reader.take_fixed(request.proof, sizeof(request.proof));
+    reader.take_fixed(request.signature, sizeof(request.signature));
 
     std::uint8_t hint = reader.take_u8();
     if (hint > static_cast<std::uint8_t>(TransportKind::ServerRelay)) {

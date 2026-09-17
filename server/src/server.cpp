@@ -552,12 +552,23 @@ void Server::handle_frame(Shard& shard, const ConnectionPtr& connection, const F
 }
 
 void Server::handle_client_hello(const ConnectionPtr& connection, const Frame& frame) {
-    if (connection->hello_received) {
+    ClientHello hello = ClientHello::decode(frame.payload);
+
+    // A receiver between transfers sends a fresh hello to publish its new ports
+    // and ephemeral key, because the sockets from the last transfer were consumed
+    // by it. Refreshing keeps the username claimed throughout, so a sender
+    // arriving in the gap is not told the user is offline.
+    bool refreshing = connection->hello_received &&
+                      connection->state == ConnectionState::ReceiverIdle &&
+                      hello.role == ClientRole::Receiver &&
+                      hello.username == connection->claimed_username;
+
+    if (connection->hello_received && !refreshing) {
         reject_and_close(connection, "hello sent twice");
         return;
     }
 
-    connection->hello = ClientHello::decode(frame.payload);
+    connection->hello = std::move(hello);
     connection->hello_received = true;
 
     ServerHello reply;
@@ -569,6 +580,13 @@ void Server::handle_client_hello(const ConnectionPtr& connection, const Frame& f
     // peer's own stateless probe gives it the authoritative answer either way.
     reply.reflexive_udp = connection->observed_endpoint;
     reply.reflexive_udp.set_port(connection->hello.udp_port);
+
+    if (refreshing) {
+        reply.claim_accepted = true;
+        reply.message = "still accepting as " + connection->claimed_username;
+        connection->enqueue_frame(MessageType::ServerHello, reply.encode());
+        return;
+    }
 
     if (connection->hello.role == ClientRole::Receiver) {
         ClaimResult result = sessions_.claim(connection->hello.username, connection);
@@ -645,6 +663,7 @@ void Server::handle_send_request(const ConnectionPtr& connection, const Frame& f
     std::memcpy(introduction.session_key, connection->hello.session_key,
                 sizeof(introduction.session_key));
     std::memcpy(introduction.proof, request.proof, sizeof(introduction.proof));
+    std::memcpy(introduction.signature, request.signature, sizeof(introduction.signature));
     introduction.pairing_id = pairing_id;
     introduction.transport_hint = request.transport_hint;
 

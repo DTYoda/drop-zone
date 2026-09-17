@@ -63,6 +63,7 @@ constexpr const char* kInfoDataKeyReceiverToSender = "drop-zone/v1 data receiver
 constexpr const char* kInfoNoncePrefixSenderToReceiver = "drop-zone/v1 nonce sender->receiver";
 constexpr const char* kInfoNoncePrefixReceiverToSender = "drop-zone/v1 nonce receiver->sender";
 constexpr const char* kInfoOfferKey = "drop-zone/v1 sealed offer";
+constexpr const char* kInfoTransportHandshake = "drop-zone/v1 transport handshake";
 constexpr const char* kMacContextSenderProof = "drop-zone/v1 sender proof";
 constexpr const char* kMacContextReceiverProof = "drop-zone/v1 receiver proof";
 constexpr const char* kSignContextTranscript = "drop-zone/v1 transcript signature";
@@ -174,6 +175,10 @@ struct SendRequest {
     /// Proof that the sender knows the target's public password, MAC-ed over the
     /// transcript so it cannot be replayed into another session.
     std::uint8_t proof[kSha256Size]{};
+    /// Signature over the same bytes under the sender's identity key. Proves the
+    /// sender holds the private half, which is what makes the receiver's pinning
+    /// record worth keeping.
+    std::uint8_t signature[kEd25519SignatureSize]{};
     /// The sender's --force-transport, passed through to the receiver so both
     /// peers run the same ladder. A test knob, not a security control.
     TransportKind transport_hint = TransportKind::None;
