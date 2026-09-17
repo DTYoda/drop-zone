@@ -31,6 +31,9 @@
 
 #pragma once
 
+#include <sys/socket.h>
+#include <sys/uio.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -84,10 +87,32 @@ struct UdpTuning {
     double initial_cwnd = 32.0;
     double min_cwnd = 4.0;
     /// Ceiling on the window, which also bounds the retransmission buffer:
-    /// 8192 * 1200 bytes is about 9.4 MiB in flight.
-    double max_cwnd = 8192.0;
+    /// 2048 * 1200 bytes is about 2.4 MiB in flight, enough to keep a 400 Mb/s path
+    /// with a 50 ms round trip busy. Raising it further mostly buys overshoot: the
+    /// window has to be refilled from a socket buffer the kernel will not usually
+    /// grow past a couple of hundred kilobytes.
+    double max_cwnd = 2048.0;
 
-    std::uint64_t min_rto_us = 20'000;
+    /// Packets the pacer will release in one go.
+    ///
+    /// Pacing spreads a window over the round trip, and the point of a burst limit is
+    /// that the receiving kernel's socket buffer is small -- typically 208 KB on Linux,
+    /// which is about 170 datagrams. Dumping more than that between two of the
+    /// receiver's drains overruns it, and the resulting loss lands on the tail of the
+    /// window where selective acknowledgement cannot see it, so it costs a full
+    /// retransmission timeout to recover.
+    double max_burst = 48.0;
+
+    /// Floor on the retransmission timer.
+    ///
+    /// RFC 6298 recommends a one-second minimum, which exists to keep TCP from
+    /// treating a slow path as a lossy one and competing unfairly with other flows.
+    /// That reasoning is weaker here: both ends are this program, selective
+    /// acknowledgement recovers most losses without ever reaching the timer, and a
+    /// floor far above the actual round trip turns each loss the bitmap cannot see
+    /// into a visible stall. 5 ms is still an order of magnitude above a
+    /// same-datacentre round trip.
+    std::uint64_t min_rto_us = 5'000;
     std::uint64_t max_rto_us = 2'000'000;
     std::uint64_t initial_rto_us = 200'000;
 
@@ -151,6 +176,20 @@ private:
         bool acknowledged = false;
     };
 
+    /// What the caller of pump is waiting for.
+    ///
+    /// pump does the same work whatever the intent; the intent decides only whether it
+    /// is worth sleeping at the end. Without it, pump cannot tell "the caller has
+    /// nothing left to send, let it return" from "the caller is blocked and should
+    /// wait" -- and getting that wrong is expensive in both directions: sleeping
+    /// needlessly stalls a transfer for the whole timeout, and not sleeping when
+    /// blocked spins a core.
+    enum class PumpIntent {
+        SendOnly,   ///< write_bytes: wait only while the window or the pacer blocks it.
+        AwaitData,  ///< read_exactly: wait until something has been delivered.
+        AwaitAcks,  ///< flush: wait until everything sent has been acknowledged.
+    };
+
     /// Move the protocol forward: send what the window allows, retransmit what has
     /// timed out, take in whatever has arrived, and acknowledge it.
     ///
@@ -158,7 +197,7 @@ private:
     /// read_exactly and write_bytes are both blocking calls that can afford to
     /// drive the protocol themselves -- and a single-threaded protocol needs no
     /// locking on the hot path.
-    void pump(int max_wait_ms);
+    void pump(PumpIntent intent, int max_wait_ms);
 
     void fill_window();
     void retransmit_timed_out(std::uint64_t now_us);
@@ -172,6 +211,13 @@ private:
     void flush_send_batch();
     void update_rtt(std::uint64_t sample_us);
     void on_loss();
+
+    /// Packets the pacer currently authorises. Accrues tokens for the time elapsed
+    /// since the last call.
+    double refill_pacing_tokens(std::uint64_t now_us);
+
+    /// Microseconds until the pacer will authorise another packet.
+    std::uint64_t time_until_token_us() const;
 
     /// Microseconds until the oldest unacknowledged packet needs resending.
     std::uint64_t time_until_rto_us(std::uint64_t now_us) const;
@@ -198,8 +244,17 @@ private:
     std::uint64_t srtt_us_ = 0;
     std::uint64_t rttvar_us_ = 0;
     std::uint64_t rto_us_ = 0;
-    /// Earliest the next packet may leave, for pacing.
-    std::uint64_t next_send_us_ = 0;
+
+    /// Pacing, as a token bucket measured in packets.
+    ///
+    /// Tokens accrue at cwnd packets per round trip, which is the rate the congestion
+    /// window authorises, and are capped at tuning_.max_burst so a sender that has
+    /// been waiting cannot release the whole window at once. A deadline-based pacer
+    /// would do the same job, but a bucket makes "how much may I send right now" a
+    /// single number and the burst limit an explicit cap rather than an emergent
+    /// property of the clock's resolution.
+    double send_tokens_ = 0.0;
+    std::uint64_t last_token_us_ = 0;
 
     // -- Receive side -------------------------------------------------------
     std::uint32_t receive_next_ = 0;  ///< Next sequence to deliver.
@@ -212,9 +267,43 @@ private:
     bool sent_fin_ = false;
 
     // -- Batching -----------------------------------------------------------
-    /// Datagrams staged for one sendmmsg call. Each entry owns its bytes because
-    /// the syscall reads them after fill_window has moved on.
-    std::vector<std::vector<std::uint8_t>> send_batch_;
+    //
+    // Everything a batch needs is allocated once, in the constructor, and reused for
+    // the life of the channel. This is not premature: the buffers for one recvmmsg
+    // call are batch_size times the datagram size, so allocating and zeroing them per
+    // call -- which the obvious implementation does -- costs more than the syscall it
+    // is preparing. Measured on loopback, hoisting them out roughly tripled the
+    // transport's throughput.
+
+    /// One datagram queued for sending, as a view rather than a copy.
+    ///
+    /// Data packets point at the datagram already held in unacknowledged_ for
+    /// retransmission, so a packet is built once instead of being copied into a
+    /// staging buffer on its way to the kernel. Control packets are staged in
+    /// control_staging_, which is fixed size so the views into it stay valid.
+    struct PendingSend {
+        const std::uint8_t* data = nullptr;
+        std::size_t length = 0;
+    };
+
+    void queue_send(const std::uint8_t* data, std::size_t length);
+
+    std::vector<PendingSend> send_batch_;
+
+    /// Room for the acknowledgements and control packets of one batch.
+    std::vector<std::uint8_t> control_staging_;
+    std::size_t control_used_ = 0;
+
+    /// Preallocated scratch for the batched syscalls.
+    std::vector<std::uint8_t> receive_storage_;
+    std::vector<std::size_t> receive_lengths_;
+#if defined(DZ_PLATFORM_LINUX)
+    std::vector<struct mmsghdr> receive_messages_;
+    std::vector<struct iovec> receive_vectors_;
+    std::vector<sockaddr_storage> receive_addresses_;
+    std::vector<struct mmsghdr> send_messages_;
+    std::vector<struct iovec> send_vectors_;
+#endif
 
     double test_loss_rate_ = 0.0;
     std::uint64_t test_loss_counter_ = 0;

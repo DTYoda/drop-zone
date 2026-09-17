@@ -1,15 +1,18 @@
 // Tier 1 of the ladder: a direct TCP connection.
 //
-// Both peers listen and both connect to every address the other advertised, all
-// at once. Whichever completes first wins and the rest are dropped. Doing both
-// halves rather than picking a "server" side is what makes this work in the
-// asymmetric cases: if only one peer is reachable -- one on a LAN with a port
-// forward, the other behind a NAT that allows nothing inbound -- then exactly one
-// direction succeeds, and neither peer has to know in advance which.
+// One direction only: the file sender connects, the receiver listens. Having both
+// peers connect looks attractive because it covers a wider set of network
+// arrangements, but on any path where both directions work -- a shared LAN, or two
+// hosts with public addresses -- it produces two connections and no way for the
+// peers to agree on which of them to use. One would send on the socket it dialled
+// while the other waited on the socket it accepted, and the transfer would stall.
+// Resolving that needs a tiebreak protocol, and the cases it would buy are exactly
+// the ones tier 2 already handles: if the receiver is unreachable, UDP hole
+// punching is the answer rather than a reversed TCP connection.
 //
 // A completed connection is not trusted until a two-way handshake over it proves
 // the other end holds the session's handshake key. Without that, anything that
-// scanned the listening port would be adopted as the peer.
+// happened to connect to the listening port would be adopted as the peer.
 
 #include <netinet/in.h>
 #include <poll.h>
@@ -30,10 +33,14 @@
 namespace dz::client {
 namespace {
 
-/// Tag distinguishing the two directions of the handshake, so the proof one peer
-/// sends cannot be echoed back as the answer.
-constexpr const char* kSenderTag = "drop-zone/v1 tcp handshake sender";
-constexpr const char* kReceiverTag = "drop-zone/v1 tcp handshake receiver";
+/// Tags distinguishing the two ends of the handshake, so the proof one peer sends
+/// cannot be echoed straight back as the answer.
+///
+/// Keyed on which end dialled and which end accepted, not on who is sending the
+/// files: that is the only distinction both peers are guaranteed to agree on for a
+/// given socket.
+constexpr const char* kDialledTag = "drop-zone/v1 tcp handshake dialled";
+constexpr const char* kAcceptedTag = "drop-zone/v1 tcp handshake accepted";
 
 /// Size of a socket buffer request. 4 MiB covers a 100 ms path at 320 Mb/s
 /// without the window becoming the limit; the kernel usually grants less and
@@ -52,11 +59,11 @@ void tune_socket(int fd) {
 
 /// Exchange proofs over a freshly connected socket. Returns false if the other
 /// end cannot prove it belongs to this session.
-bool authenticate(int fd, const Key& key, bool is_sender, int timeout_ms) {
+bool authenticate(int fd, const Key& key, bool dialled, int timeout_ms) {
     std::uint8_t own[kSha256Size];
     std::uint8_t expected[kSha256Size];
-    compute_proof(key, is_sender ? kSenderTag : kReceiverTag, own);
-    compute_proof(key, is_sender ? kReceiverTag : kSenderTag, expected);
+    compute_proof(key, dialled ? kDialledTag : kAcceptedTag, own);
+    compute_proof(key, dialled ? kAcceptedTag : kDialledTag, expected);
 
     // Blocking with a receive timeout, rather than another poll loop: by this
     // point there is exactly one socket left and the handshake is two 32-byte
@@ -195,7 +202,15 @@ private:
     Endpoint peer_;
 };
 
-ChannelPtr try_direct_tcp(LocalSockets& sockets, const TransportRequest& request) {
+namespace {
+
+/// The sender's half: dial every candidate at once and take the first that answers
+/// correctly.
+///
+/// All of them in parallel rather than in turn, because a candidate on an interface
+/// with no route to the peer can take a full connect timeout to fail, and trying
+/// them sequentially would spend the whole budget on the first dead one.
+ChannelPtr connect_to_peer(const TransportRequest& request) {
     std::vector<PendingConnect> attempts;
     attempts.reserve(request.peer_candidates.size());
 
@@ -204,22 +219,13 @@ ChannelPtr try_direct_tcp(LocalSockets& sockets, const TransportRequest& request
         if (fd.valid()) attempts.push_back(PendingConnect{std::move(fd), candidate});
     }
 
-    log::debug("direct TCP: listening on port " + std::to_string(sockets.port) + " and trying " +
-               std::to_string(attempts.size()) + " candidates");
+    log::debug("direct TCP: dialling " + std::to_string(attempts.size()) + " candidates");
 
     std::uint64_t deadline = monotonic_millis() + request.tcp_budget_ms;
 
-    while (monotonic_millis() < deadline) {
+    while (!attempts.empty() && monotonic_millis() < deadline) {
         std::vector<pollfd> waits;
-        waits.reserve(attempts.size() + 1);
-
-        // The listener first, so an inbound connection is noticed as readily as
-        // an outbound one completing.
-        pollfd listener{};
-        listener.fd = sockets.tcp_listener.get();
-        listener.events = POLLIN;
-        waits.push_back(listener);
-
+        waits.reserve(attempts.size());
         for (const PendingConnect& attempt : attempts) {
             pollfd entry{};
             entry.fd = attempt.fd.get();
@@ -229,42 +235,17 @@ ChannelPtr try_direct_tcp(LocalSockets& sockets, const TransportRequest& request
 
         std::uint64_t now = monotonic_millis();
         int remaining = static_cast<int>((deadline > now) ? (deadline - now) : 0);
-        // Poll in short slices so a candidate that fails fast is retired promptly
-        // rather than at the end of the budget.
         int slice = (remaining > 200) ? 200 : remaining;
 
         int ready = ::poll(waits.data(), static_cast<nfds_t>(waits.size()), slice);
         if (ready < 0) {
             if (errno == EINTR) continue;
-            fail_errno("poll failed while opening a direct connection");
+            fail_errno("poll failed while dialling the peer");
         }
-
-        if ((waits[0].revents & POLLIN) != 0) {
-            sockaddr_storage storage{};
-            socklen_t length = sizeof(storage);
-            int raw = ::accept(sockets.tcp_listener.get(), reinterpret_cast<sockaddr*>(&storage),
-                               &length);
-            if (raw >= 0) {
-                Fd accepted(raw);
-                set_close_on_exec(accepted.get());
-                tune_socket(accepted.get());
-
-                Endpoint peer =
-                    Endpoint::from_sockaddr(reinterpret_cast<sockaddr*>(&storage), length);
-
-                // The inbound side of the pair takes the opposite handshake role,
-                // so both directions of a simultaneous open agree.
-                if (authenticate(accepted.get(), request.handshake_key, !request.is_sender, 2000)) {
-                    log::debug("direct TCP: accepted a connection from " + peer.to_string());
-                    return std::make_unique<TcpChannel>(std::move(accepted), std::move(peer));
-                }
-                log::debug("direct TCP: an inbound connection could not prove it was the peer");
-            }
-        }
+        if (ready == 0) continue;
 
         for (std::size_t i = 0; i < attempts.size();) {
-            short events = waits[i + 1].revents;
-            if (events == 0) {
+            if (waits[i].revents == 0) {
                 ++i;
                 continue;
             }
@@ -275,32 +256,72 @@ ChannelPtr try_direct_tcp(LocalSockets& sockets, const TransportRequest& request
                 Endpoint target = attempts[i].target;
                 set_nonblocking(fd.get(), false);
 
-                if (authenticate(fd.get(), request.handshake_key, request.is_sender, 2000)) {
+                if (authenticate(fd.get(), request.handshake_key, /*dialled=*/true, 2000)) {
                     log::debug("direct TCP: connected to " + target.to_string());
                     return std::make_unique<TcpChannel>(std::move(fd), std::move(target));
                 }
-                log::debug("direct TCP: " + target.to_string() + " could not prove it was the peer");
-                attempts.erase(attempts.begin() + static_cast<std::ptrdiff_t>(i));
-                waits.erase(waits.begin() + static_cast<std::ptrdiff_t>(i) + 1);
-                continue;
+                log::debug("direct TCP: " + target.to_string() + " is not the peer");
             }
-            if (status < 0) {
+
+            if (status != 0) {
                 attempts.erase(attempts.begin() + static_cast<std::ptrdiff_t>(i));
-                waits.erase(waits.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+                waits.erase(waits.begin() + static_cast<std::ptrdiff_t>(i));
                 continue;
             }
             ++i;
         }
-
-        // Every attempt failed and nothing is listening for us. Keep waiting on
-        // the listener alone in case the peer is slower to start.
-        if (attempts.empty() && !wait_readable(sockets.tcp_listener.get(), slice)) {
-            if (monotonic_millis() >= deadline) break;
-        }
     }
 
-    log::debug("direct TCP: no connection within the budget");
     return nullptr;
+}
+
+/// The receiver's half: wait for the sender to arrive.
+///
+/// Keeps waiting after an unauthenticated connection rather than giving up, so an
+/// unrelated port scan cannot deny the transfer by connecting first.
+ChannelPtr wait_for_peer(LocalSockets& sockets, const TransportRequest& request) {
+    log::debug("direct TCP: listening on port " + std::to_string(sockets.port));
+
+    std::uint64_t deadline = monotonic_millis() + request.tcp_budget_ms;
+
+    while (monotonic_millis() < deadline) {
+        std::uint64_t now = monotonic_millis();
+        int remaining = static_cast<int>((deadline > now) ? (deadline - now) : 0);
+        if (!wait_readable(sockets.tcp_listener.get(), (remaining > 200) ? 200 : remaining)) {
+            continue;
+        }
+
+        sockaddr_storage storage{};
+        socklen_t length = sizeof(storage);
+        int raw =
+            ::accept(sockets.tcp_listener.get(), reinterpret_cast<sockaddr*>(&storage), &length);
+        if (raw < 0) continue;
+
+        Fd accepted(raw);
+        set_close_on_exec(accepted.get());
+        set_nonblocking(accepted.get(), false);
+        tune_socket(accepted.get());
+
+        Endpoint peer = Endpoint::from_sockaddr(reinterpret_cast<sockaddr*>(&storage), length);
+
+        if (authenticate(accepted.get(), request.handshake_key, /*dialled=*/false, 2000)) {
+            log::debug("direct TCP: accepted a connection from " + peer.to_string());
+            return std::make_unique<TcpChannel>(std::move(accepted), std::move(peer));
+        }
+        log::debug("direct TCP: an inbound connection could not prove it was the peer");
+    }
+
+    return nullptr;
+}
+
+}  // namespace
+
+ChannelPtr try_direct_tcp(LocalSockets& sockets, const TransportRequest& request) {
+    ChannelPtr channel =
+        request.is_sender ? connect_to_peer(request) : wait_for_peer(sockets, request);
+
+    if (channel == nullptr) log::debug("direct TCP: no connection within the budget");
+    return channel;
 }
 
 }  // namespace dz::client

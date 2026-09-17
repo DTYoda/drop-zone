@@ -371,7 +371,7 @@ void Server::service_connection(Shard& shard, const ConnectionPtr& connection,
         // waiting for.
         if (connection->state == ConnectionState::Relaying &&
             connection->pending_output() <= kRelayResumeThreshold) {
-            if (ConnectionPtr peer = connection->relay_peer.lock()) {
+            if (ConnectionPtr peer = connection->relay_peer()) {
                 if (peer->read_paused()) {
                     peer->set_read_paused(false);
                     wake_for(peer);
@@ -769,8 +769,12 @@ void Server::handle_relay_open(const ConnectionPtr& connection, const Frame& fra
         return;
     }
 
-    sender->relay_peer = receiver;
-    receiver->relay_peer = sender;
+    sender->attach_relay_peer(receiver);
+    receiver->attach_relay_peer(sender);
+    // Relaying is published after both attachments, so a shard that observes
+    // Relaying is guaranteed to find a peer. Reversing the two would let the
+    // first RelayData land on a connection whose peer pointer is still empty,
+    // which closes the transfer.
     sender->state = ConnectionState::Relaying;
     receiver->state = ConnectionState::Relaying;
 
@@ -788,7 +792,7 @@ void Server::handle_relay_data(const ConnectionPtr& connection, const Frame& fra
         return;
     }
 
-    ConnectionPtr peer = connection->relay_peer.lock();
+    ConnectionPtr peer = connection->relay_peer();
     if (peer == nullptr) {
         connection->request_close("the other peer disconnected");
         return;
@@ -808,7 +812,7 @@ void Server::handle_relay_data(const ConnectionPtr& connection, const Frame& fra
 }
 
 void Server::handle_relay_close(const ConnectionPtr& connection, const Frame& frame) {
-    if (ConnectionPtr peer = connection->relay_peer.lock()) {
+    if (ConnectionPtr peer = connection->relay_peer()) {
         peer->enqueue_frame(MessageType::RelayClose, frame.payload);
         peer->request_close("the other peer closed the relay");
         wake_for(peer);

@@ -130,6 +130,23 @@ void preallocate_file(int fd, std::uint64_t size) {
     }
 }
 
+void write_file_all(int fd, const void* data, std::size_t len) {
+    const auto* cursor = static_cast<const std::uint8_t*>(data);
+    std::size_t remaining = len;
+
+    while (remaining > 0) {
+        ssize_t written = ::write(fd, cursor, remaining);
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            fail_errno("cannot write to file");
+        }
+        if (written == 0) fail("the file accepted no bytes");
+
+        cursor += written;
+        remaining -= static_cast<std::size_t>(written);
+    }
+}
+
 void pwrite_all(int fd, const void* data, std::size_t len, std::uint64_t offset) {
     const auto* cursor = static_cast<const std::uint8_t*>(data);
     std::size_t remaining = len;

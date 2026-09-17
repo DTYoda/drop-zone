@@ -39,6 +39,16 @@ const char* connection_state_name(ConnectionState state) {
 Connection::Connection(Fd fd, std::uint64_t id, unsigned shard_index)
     : fd_(std::move(fd)), id_(id), shard_index_(shard_index), label_(log::describe_peer(id)) {}
 
+void Connection::attach_relay_peer(const ConnectionPtr& peer) {
+    std::lock_guard<std::mutex> guard(relay_mutex_);
+    relay_peer_ = peer;
+}
+
+ConnectionPtr Connection::relay_peer() const {
+    std::lock_guard<std::mutex> guard(relay_mutex_);
+    return relay_peer_.lock();
+}
+
 Connection::~Connection() {
     // Both buffers can hold a peer's public keys and candidate addresses, and
     // the relay buffers hold their ciphertext. Wiping on the way out means a
@@ -191,10 +201,17 @@ bool Connection::flush_output() {
 }
 
 void Connection::request_close(std::string_view reason) {
-    bool expected = false;
-    if (close_requested_.compare_exchange_strong(expected, true)) {
-        close_reason_.assign(reason);
-    }
+    // The reason is written before the flag is published, so a shard that sees
+    // close_requested() can read close_reason() without racing the assignment.
+    std::lock_guard<std::mutex> guard(close_mutex_);
+    if (close_requested_.load(std::memory_order_relaxed)) return;
+    close_reason_.assign(reason);
+    close_requested_.store(true, std::memory_order_release);
+}
+
+std::string Connection::close_reason() const {
+    std::lock_guard<std::mutex> guard(close_mutex_);
+    return close_reason_;
 }
 
 }  // namespace dz::server

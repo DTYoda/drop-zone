@@ -110,7 +110,7 @@ void KnownPeers::save() const {
     if (raw < 0) fail_errno("cannot create '" + temporary + "'");
 
     Fd fd(raw);
-    write_all(fd.get(), contents.data(), contents.size());
+    write_file_all(fd.get(), contents.data(), contents.size());
     fd.reset();
 
     if (::rename(temporary.c_str(), path_.c_str()) != 0) {

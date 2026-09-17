@@ -92,6 +92,13 @@ public:
     bool operator==(const Endpoint& other) const noexcept;
     bool operator!=(const Endpoint& other) const noexcept { return !(*this == other); }
 
+    /// This address in the IPv4-mapped IPv6 form ::ffff:a.b.c.d.
+    ///
+    /// A dual-stack AF_INET6 socket can only reach an IPv4 host through this form;
+    /// handing it a plain sockaddr_in fails with EAFNOSUPPORT. Returns *this
+    /// unchanged when it is already IPv6.
+    Endpoint as_v4_mapped() const;
+
 private:
     sockaddr_storage storage_{};
     socklen_t len_ = 0;
@@ -131,6 +138,15 @@ void ignore_sigpipe();
 Endpoint local_endpoint(int fd);
 Endpoint peer_endpoint(int fd);
 
+/// Convert `target` into a form a socket of `socket_family` can send to.
+///
+/// Needed because a candidate list mixes IPv4 and IPv6 addresses while a socket has
+/// one family for life. An IPv4 target reached from a dual-stack IPv6 socket becomes
+/// its IPv4-mapped form; an IPv4-mapped target reached from an IPv4 socket is
+/// unwrapped. Returns false for a pair that cannot be reconciled at all, such as a
+/// real IPv6 address from an IPv4-only socket, which the caller should skip.
+bool adapt_endpoint_for_socket(const Endpoint& target, int socket_family, Endpoint& out);
+
 /// Write every byte or throw. Handles short writes and EINTR.
 void write_all(int fd, const void* data, std::size_t len);
 
@@ -140,6 +156,16 @@ void read_exact(int fd, void* data, std::size_t len);
 
 /// Wait until `fd` is readable. Returns false on timeout.
 bool wait_readable(int fd, int timeout_ms);
+
+/// Wait until `fd` is readable, with a microsecond timeout.
+///
+/// poll() only takes whole milliseconds, which is far too coarse for pacing a
+/// transport: the interval between packets on a fast path is a few microseconds, so
+/// rounding a wait up to a millisecond turns a small delay into a large one. ppoll on
+/// Linux accepts a timespec and honours it to within the kernel's timer slack, around
+/// fifty microseconds. Elsewhere this rounds up to the nearest millisecond, which is
+/// the best poll() can express.
+bool wait_readable_micros(int fd, std::uint64_t timeout_us);
 
 /// Wait until `fd` is writable. Returns false on timeout.
 bool wait_writable(int fd, int timeout_ms);

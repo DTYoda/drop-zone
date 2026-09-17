@@ -33,6 +33,18 @@ constexpr int kPunchIntervalMs = 50;
 /// Bounds what a peer can make us hold by sending a window with a permanent hole.
 constexpr std::size_t kMaxReorderPackets = 16384;
 
+/// Bytes that may sit delivered but unread before delivery pauses.
+///
+/// This is the receive window, and it is enforced by simply not draining the reorder
+/// buffer: the acknowledged sequence stops advancing, the sender's congestion window
+/// fills, and it stops sending. No window field in the header is needed, and a
+/// receiver whose application has stopped reading cannot be made to buffer without
+/// limit.
+constexpr std::size_t kMaxDeliveredBacklog = 8u * 1024 * 1024;
+
+/// Assumed round trip before any measurement exists, for sizing the pacing rate.
+constexpr double kAssumedRttUs = 1000.0;
+
 void write_header(std::uint8_t* out, UdpPacketType type, std::uint32_t sequence, std::uint32_t ack,
                   std::uint64_t ack_bits, std::uint16_t length) {
     out[0] = kMagic[0];
@@ -78,9 +90,28 @@ void punch_proof(const Key& key, const char* tag, std::uint8_t out[kSha256Size])
 // Hole punching
 // ---------------------------------------------------------------------------
 
-bool punch_udp_path(int socket_fd, const std::vector<Endpoint>& candidates,
+bool punch_udp_path(int socket_fd, const std::vector<Endpoint>& raw_candidates,
                     const Key& handshake_key, bool is_sender, std::uint32_t budget_ms,
                     Endpoint& chosen) {
+    // The receive loop below drains the socket until it reports EAGAIN, which only
+    // happens on a non-blocking socket. On a blocking one, a datagram that fails its
+    // proof check -- a stray packet, or a peer with the wrong key -- would leave the
+    // loop waiting forever for a second one that never comes.
+    set_nonblocking(socket_fd, true);
+
+    // The socket has one address family for its whole life while the candidate list
+    // mixes both, so every target is converted into a form this socket can reach
+    // and anything that cannot be reconciled is dropped here rather than failing
+    // once per probe round.
+    int family = local_endpoint(socket_fd).family();
+
+    std::vector<Endpoint> candidates;
+    candidates.reserve(raw_candidates.size());
+    for (const Endpoint& candidate : raw_candidates) {
+        Endpoint adapted;
+        if (adapt_endpoint_for_socket(candidate, family, adapted)) candidates.push_back(adapted);
+    }
+
     std::uint8_t own_proof[kSha256Size];
     std::uint8_t expected_proof[kSha256Size];
     punch_proof(handshake_key, is_sender ? kPunchSenderTag : kPunchReceiverTag, own_proof);
@@ -200,7 +231,25 @@ ReliableUdpChannel::ReliableUdpChannel(Fd socket, Endpoint peer, UdpTuning tunin
     // already spreads the window out.
     set_socket_buffers(socket_.get(), 8 * 1024 * 1024);
 
-    send_batch_.reserve(tuning_.batch_size);
+    // Everything the batched syscalls need, allocated once.
+    std::size_t batch = tuning_.batch_size;
+    send_batch_.reserve(batch);
+    control_staging_.resize(kUdpHeaderSize * batch);
+    receive_storage_.resize(kUdpDatagramSize * batch);
+    receive_lengths_.resize(batch);
+
+#if defined(DZ_PLATFORM_LINUX)
+    receive_messages_.resize(batch);
+    receive_vectors_.resize(batch);
+    receive_addresses_.resize(batch);
+    send_messages_.resize(batch);
+    send_vectors_.resize(batch);
+#endif
+
+    // The delivered-bytes buffer is sized for the flow-control limit up front, so a
+    // transfer never pauses to reallocate and copy several megabytes -- which stalls
+    // acknowledgements long enough to trigger spurious retransmission timeouts.
+    delivered_.reserve(kMaxDeliveredBacklog + kUdpMaxPayload);
 }
 
 ReliableUdpChannel::~ReliableUdpChannel() = default;
@@ -220,7 +269,7 @@ void ReliableUdpChannel::write_bytes(const void* data, std::size_t len) {
     // outrun the congestion window because its write does not return until the
     // window has carried the bytes away.
     while (outgoing_consumed_ < outgoing_.size()) {
-        pump(50);
+        pump(PumpIntent::SendOnly, 50);
     }
 
     // Reclaim the buffer now that it is drained, rather than letting it grow to
@@ -230,6 +279,16 @@ void ReliableUdpChannel::write_bytes(const void* data, std::size_t len) {
 }
 
 void ReliableUdpChannel::read_exactly(void* data, std::size_t len) {
+    // Drain the socket and acknowledge before serving anything out of the buffer.
+    //
+    // Without this a receiver that already holds what the caller asked for returns
+    // without touching the socket at all, so it stops acknowledging for as long as its
+    // backlog lasts. The sender's window fills, it hears nothing, and it waits out a
+    // retransmission timeout -- which measured as the majority of a transfer's
+    // duration. The pump is non-blocking, so the cost when there is nothing to do is
+    // two syscalls.
+    pump(PumpIntent::AwaitData, 0);
+
     auto* out = static_cast<std::uint8_t*>(data);
     std::size_t copied = 0;
 
@@ -250,7 +309,7 @@ void ReliableUdpChannel::read_exactly(void* data, std::size_t len) {
 
         if (peer_finished_ && reorder_buffer_.empty()) throw PeerClosed();
 
-        pump(200);
+        pump(PumpIntent::AwaitData, 200);
     }
 }
 
@@ -258,7 +317,7 @@ void ReliableUdpChannel::flush() {
     // Everything queued has to be acknowledged, not merely sent, before this
     // returns: the caller is about to treat the data as delivered.
     while (outgoing_consumed_ < outgoing_.size() || !unacknowledged_.empty()) {
-        pump(200);
+        pump(PumpIntent::AwaitAcks, 200);
     }
     flush_send_batch();
 }
@@ -272,7 +331,7 @@ void ReliableUdpChannel::close_gracefully() {
         while (!fin_acknowledged_ && monotonic_millis() < deadline) {
             send_control(UdpPacketType::Fin);
             flush_send_batch();
-            pump(100);
+            pump(PumpIntent::AwaitAcks, 100);
         }
     } catch (const Error&) {
         // A failure while closing is not worth propagating: the transfer itself
@@ -282,7 +341,7 @@ void ReliableUdpChannel::close_gracefully() {
 
 // -- Protocol engine --------------------------------------------------------
 
-void ReliableUdpChannel::pump(int max_wait_ms) {
+void ReliableUdpChannel::pump(PumpIntent intent, int max_wait_ms) {
     std::uint64_t now_us = monotonic_micros();
 
     retransmit_timed_out(now_us);
@@ -298,36 +357,91 @@ void ReliableUdpChannel::pump(int max_wait_ms) {
         ack_pending_ = false;
     }
 
-    // Nothing more to do until either a packet arrives or a timer fires. Sleep
-    // until the sooner of the two rather than spinning.
-    bool can_send_more = outgoing_consumed_ < outgoing_.size() &&
-                         static_cast<double>(unacknowledged_.size()) < cwnd_;
-    if (can_send_more || max_wait_ms <= 0) return;
-
+    // Decide whether sleeping is the right thing to do, which depends entirely on
+    // what the caller is waiting for.
     now_us = monotonic_micros();
+
+    bool has_more_to_send = outgoing_consumed_ < outgoing_.size();
+    bool paced_out = send_tokens_ < 1.0;
+    bool window_full = static_cast<double>(unacknowledged_.size()) >= cwnd_;
+
+    bool should_wait = false;
+    switch (intent) {
+        case PumpIntent::SendOnly:
+            // Only worth waiting if something is actually holding the sender back.
+            // Waiting because there is nothing left to send would add the whole
+            // timeout to every write -- measured as most of a transfer's duration,
+            // since the data plane writes a megabyte at a time and each write ended
+            // in a needless sleep.
+            should_wait = has_more_to_send && (window_full || paced_out);
+            break;
+        case PumpIntent::AwaitData:
+            should_wait = delivered_consumed_ >= delivered_.size() && !peer_finished_;
+            break;
+        case PumpIntent::AwaitAcks:
+            should_wait = has_more_to_send || !unacknowledged_.empty();
+            break;
+    }
+
+    if (!should_wait || max_wait_ms <= 0) return;
+
     std::uint64_t wait_us = static_cast<std::uint64_t>(max_wait_ms) * 1000;
 
     if (!unacknowledged_.empty()) {
         wait_us = std::min(wait_us, time_until_rto_us(now_us));
     }
-    if (next_send_us_ > now_us) {
-        wait_us = std::min(wait_us, next_send_us_ - now_us);
+    if (paced_out && has_more_to_send && !window_full) {
+        wait_us = std::min(wait_us, time_until_token_us());
     }
 
-    int wait_ms = static_cast<int>(wait_us / 1000);
-    if (wait_ms < 1) wait_ms = 1;
-    (void)wait_readable(socket_.get(), wait_ms);
+    // Microsecond resolution matters here: a pacing wait is often tens of
+    // microseconds, and rounding it up to poll()'s one-millisecond granularity would
+    // cap the transport at roughly the burst size per millisecond.
+    if (wait_us < 1) wait_us = 1;
+    (void)wait_readable_micros(socket_.get(), wait_us);
+}
+
+double ReliableUdpChannel::refill_pacing_tokens(std::uint64_t now_us) {
+    if (last_token_us_ == 0) {
+        last_token_us_ = now_us;
+        send_tokens_ = tuning_.max_burst;
+        return send_tokens_;
+    }
+
+    double elapsed_us = static_cast<double>(now_us - last_token_us_);
+    last_token_us_ = now_us;
+
+    // cwnd packets per round trip is the rate the congestion window authorises.
+    double rtt_us = (srtt_us_ > 0) ? static_cast<double>(srtt_us_) : kAssumedRttUs;
+    double packets_per_us = cwnd_ / rtt_us;
+
+    send_tokens_ += elapsed_us * packets_per_us;
+    if (send_tokens_ > tuning_.max_burst) send_tokens_ = tuning_.max_burst;
+    return send_tokens_;
+}
+
+std::uint64_t ReliableUdpChannel::time_until_token_us() const {
+    if (send_tokens_ >= 1.0) return 0;
+
+    double rtt_us = (srtt_us_ > 0) ? static_cast<double>(srtt_us_) : kAssumedRttUs;
+    double packets_per_us = cwnd_ / rtt_us;
+    if (packets_per_us <= 0.0) return 1000;
+
+    return static_cast<std::uint64_t>((1.0 - send_tokens_) / packets_per_us) + 1;
 }
 
 void ReliableUdpChannel::fill_window() {
     std::uint64_t now_us = monotonic_micros();
+    refill_pacing_tokens(now_us);
 
     while (outgoing_consumed_ < outgoing_.size()) {
         if (static_cast<double>(unacknowledged_.size()) >= cwnd_) break;
 
-        // Pacing. Releasing a whole window at once is what makes a router drop a
-        // burst of it, so packets are spread evenly across the estimated RTT.
-        if (now_us < next_send_us_) break;
+        // Pacing. Releasing a whole window at line rate is what overruns the
+        // receiver's socket buffer, so a packet only goes out if the bucket has a
+        // token for it.
+        if (send_tokens_ < 1.0) break;
+        send_tokens_ -= 1.0;
 
         std::size_t remaining = outgoing_.size() - outgoing_consumed_;
         std::size_t payload = std::min(remaining, kUdpMaxPayload);
@@ -343,16 +457,12 @@ void ReliableUdpChannel::fill_window() {
 
         outgoing_consumed_ += payload;
 
-        transmit(packet.datagram.data(), packet.datagram.size());
+        // Stored first, then queued by reference: the datagram the kernel reads is
+        // the same one kept for retransmission, so a packet is built once rather
+        // than copied into a staging buffer on its way out.
         unacknowledged_.push_back(std::move(packet));
-
-        // Spread the current window across one RTT. Before any RTT sample exists,
-        // fall back to a rate that a slow link can survive.
-        std::uint64_t interval_us =
-            (srtt_us_ > 0 && cwnd_ > 0.0)
-                ? static_cast<std::uint64_t>(static_cast<double>(srtt_us_) / cwnd_)
-                : 0;
-        next_send_us_ = now_us + interval_us;
+        const SentPacket& stored = unacknowledged_.back();
+        queue_send(stored.datagram.data(), stored.datagram.size());
     }
 }
 
@@ -378,6 +488,10 @@ void ReliableUdpChannel::retransmit_timed_out(std::uint64_t now_us) {
     cwnd_fraction_ = 0.0;
     rto_us_ = std::min(tuning_.max_rto_us, rto_us_ * 2);
 
+    // Drop any accumulated allowance too: releasing a burst immediately after
+    // deciding the path is congested defeats the point of shrinking the window.
+    send_tokens_ = 0.0;
+
     // Resend the oldest packet only. If more are lost, the next timeout or the
     // selective acknowledgements will find them, and resending the whole window
     // would repeat the burst that caused the loss.
@@ -389,34 +503,30 @@ void ReliableUdpChannel::retransmit_timed_out(std::uint64_t now_us) {
     // current receive state.
     write_header(oldest.datagram.data(), UdpPacketType::Data, oldest.sequence, receive_next_, 0,
                  static_cast<std::uint16_t>(oldest.datagram.size() - kUdpHeaderSize));
-    transmit(oldest.datagram.data(), oldest.datagram.size());
+    queue_send(oldest.datagram.data(), oldest.datagram.size());
 }
 
 void ReliableUdpChannel::receive_batch() {
+    const std::size_t batch = tuning_.batch_size;
+
 #if defined(DZ_PLATFORM_LINUX)
     // One recvmmsg replaces up to batch_size recvfrom calls. At 1200 bytes per
-    // datagram this is the difference between a syscall every 1.2 KB and one
-    // every 76 KB.
-    const unsigned batch = tuning_.batch_size;
-
-    std::vector<mmsghdr> messages(batch);
-    std::vector<iovec> vectors(batch);
-    std::vector<std::array<std::uint8_t, kUdpDatagramSize>> buffers(batch);
-    std::vector<sockaddr_storage> addresses(batch);
-
+    // datagram that is the difference between a syscall every 1.2 KB and one every
+    // 76 KB.
     for (;;) {
-        for (unsigned i = 0; i < batch; ++i) {
-            vectors[i].iov_base = buffers[i].data();
-            vectors[i].iov_len = buffers[i].size();
+        for (std::size_t i = 0; i < batch; ++i) {
+            receive_vectors_[i].iov_base = receive_storage_.data() + i * kUdpDatagramSize;
+            receive_vectors_[i].iov_len = kUdpDatagramSize;
 
-            std::memset(&messages[i], 0, sizeof(messages[i]));
-            messages[i].msg_hdr.msg_iov = &vectors[i];
-            messages[i].msg_hdr.msg_iovlen = 1;
-            messages[i].msg_hdr.msg_name = &addresses[i];
-            messages[i].msg_hdr.msg_namelen = sizeof(addresses[i]);
+            std::memset(&receive_messages_[i], 0, sizeof(receive_messages_[i]));
+            receive_messages_[i].msg_hdr.msg_iov = &receive_vectors_[i];
+            receive_messages_[i].msg_hdr.msg_iovlen = 1;
+            receive_messages_[i].msg_hdr.msg_name = &receive_addresses_[i];
+            receive_messages_[i].msg_hdr.msg_namelen = sizeof(receive_addresses_[i]);
         }
 
-        int count = ::recvmmsg(socket_.get(), messages.data(), batch, 0, nullptr);
+        int count = ::recvmmsg(socket_.get(), receive_messages_.data(),
+                               static_cast<unsigned>(batch), 0, nullptr);
         if (count < 0) {
             if (errno == EINTR) continue;
             return;  // EAGAIN: nothing left to read.
@@ -424,22 +534,38 @@ void ReliableUdpChannel::receive_batch() {
         if (count == 0) return;
 
         for (int i = 0; i < count; ++i) {
-            process_packet(buffers[static_cast<std::size_t>(i)].data(), messages[static_cast<std::size_t>(i)].msg_len);
+            auto index = static_cast<std::size_t>(i);
+            process_packet(receive_storage_.data() + index * kUdpDatagramSize,
+                           receive_messages_[index].msg_len);
         }
 
         // A partly filled batch means the queue is drained.
-        if (static_cast<unsigned>(count) < batch) return;
+        if (static_cast<std::size_t>(count) < batch) return;
+
+        // Stop after one full batch if the application is not keeping up, so a fast
+        // peer cannot hold this loop indefinitely.
+        if (delivered_.size() - delivered_consumed_ >= kMaxDeliveredBacklog) return;
     }
 #else
     for (;;) {
-        std::uint8_t datagram[kUdpDatagramSize];
-        ssize_t got = ::recv(socket_.get(), datagram, sizeof(datagram), 0);
-        if (got < 0) {
-            if (errno == EINTR) continue;
-            return;
+        std::size_t received = 0;
+        for (; received < batch; ++received) {
+            std::uint8_t* slot = receive_storage_.data() + received * kUdpDatagramSize;
+            ssize_t got = ::recv(socket_.get(), slot, kUdpDatagramSize, 0);
+            if (got < 0) {
+                if (errno == EINTR) continue;
+                break;
+            }
+            if (got == 0) break;
+            receive_lengths_[received] = static_cast<std::size_t>(got);
         }
-        if (got == 0) return;
-        process_packet(datagram, static_cast<std::size_t>(got));
+
+        for (std::size_t i = 0; i < received; ++i) {
+            process_packet(receive_storage_.data() + i * kUdpDatagramSize, receive_lengths_[i]);
+        }
+
+        if (received < batch) return;
+        if (delivered_.size() - delivered_consumed_ >= kMaxDeliveredBacklog) return;
     }
 #endif
 }
@@ -573,7 +699,7 @@ void ReliableUdpChannel::process_ack(std::uint32_t ack, std::uint64_t ack_bits,
             write_header(missing.datagram.data(), UdpPacketType::Data, missing.sequence,
                          receive_next_, 0,
                          static_cast<std::uint16_t>(missing.datagram.size() - kUdpHeaderSize));
-            transmit(missing.datagram.data(), missing.datagram.size());
+            queue_send(missing.datagram.data(), missing.datagram.size());
         }
     }
 
@@ -584,6 +710,12 @@ void ReliableUdpChannel::deliver_in_order() {
     // Hand over every packet that has become contiguous, stopping at the first
     // gap. This is where datagrams become a stream.
     for (;;) {
+        // Flow control: stop draining once the application is this far behind.
+        // Because the acknowledged sequence stops advancing with it, the sender's
+        // window fills and it stops sending, without the header needing a window
+        // field.
+        if (delivered_.size() - delivered_consumed_ >= kMaxDeliveredBacklog) break;
+
         auto next = reorder_buffer_.find(receive_next_);
         if (next == reorder_buffer_.end()) break;
 
@@ -621,6 +753,20 @@ void ReliableUdpChannel::send_control(UdpPacketType type) {
 }
 
 void ReliableUdpChannel::transmit(const std::uint8_t* datagram, std::size_t len) {
+    // Control packets are copied into the fixed staging area, because the caller's
+    // buffer is on its stack and will be gone before the batch is flushed. Data
+    // packets are already stored in unacknowledged_ and are queued by reference
+    // through queue_send.
+    if (control_used_ + len > control_staging_.size()) flush_send_batch();
+
+    std::uint8_t* slot = control_staging_.data() + control_used_;
+    std::memcpy(slot, datagram, len);
+    control_used_ += len;
+
+    queue_send(slot, len);
+}
+
+void ReliableUdpChannel::queue_send(const std::uint8_t* data, std::size_t length) {
     if (test_loss_rate_ > 0.0) {
         // Deterministic thinning rather than a random draw, so a test that fails
         // fails the same way every time.
@@ -632,8 +778,7 @@ void ReliableUdpChannel::transmit(const std::uint8_t* datagram, std::size_t len)
         }
     }
 
-    send_batch_.emplace_back(datagram, datagram + len);
-    ++stats_.packets_sent;
+    send_batch_.push_back(PendingSend{data, length});
 
     if (send_batch_.size() >= tuning_.batch_size) flush_send_batch();
 }
@@ -641,51 +786,79 @@ void ReliableUdpChannel::transmit(const std::uint8_t* datagram, std::size_t len)
 void ReliableUdpChannel::flush_send_batch() {
     if (send_batch_.empty()) return;
 
-#if defined(DZ_PLATFORM_LINUX)
-    std::vector<mmsghdr> messages(send_batch_.size());
-    std::vector<iovec> vectors(send_batch_.size());
-
-    for (std::size_t i = 0; i < send_batch_.size(); ++i) {
-        vectors[i].iov_base = send_batch_[i].data();
-        vectors[i].iov_len = send_batch_[i].size();
-
-        std::memset(&messages[i], 0, sizeof(messages[i]));
-        messages[i].msg_hdr.msg_iov = &vectors[i];
-        messages[i].msg_hdr.msg_iovlen = 1;
-        messages[i].msg_hdr.msg_name = const_cast<sockaddr*>(peer_.sockaddr_ptr());
-        messages[i].msg_hdr.msg_namelen = peer_.sockaddr_len();
-    }
-
+    // A full kernel send buffer must not become a dropped packet.
+    //
+    // Discarding the rest of the batch on EAGAIN looks harmless -- this is an
+    // unreliable transport and the retransmission timer would eventually recover --
+    // but it is loss this side inflicted on itself, and it lands on the tail of the
+    // window where there are no later packets to acknowledge. Selective
+    // acknowledgement cannot see it, so recovery costs a full retransmission timeout
+    // per drop. Measured on loopback, that alone held the transport to about four
+    // megabytes a second.
+    //
+    // So the buffer being full is treated as back-pressure: wait briefly for room,
+    // and if there is still none, keep the unsent datagrams for the next flush.
     std::size_t sent = 0;
-    while (sent < messages.size()) {
-        int count = ::sendmmsg(socket_.get(), messages.data() + sent,
-                               static_cast<unsigned>(messages.size() - sent), 0);
-        if (count < 0) {
-            if (errno == EINTR) continue;
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // The kernel's send buffer is full. Dropping the rest is
-                // acceptable: this is an unreliable transport underneath, and the
-                // retransmission timer exists for exactly this.
-                break;
-            }
-            if (errno == ECONNREFUSED) break;  // An ICMP error from an earlier packet.
-            fail_errno("sendmmsg to the peer failed");
+    int stalls = 0;
+
+    while (sent < send_batch_.size()) {
+#if defined(DZ_PLATFORM_LINUX)
+        std::size_t batch = send_batch_.size() - sent;
+
+        for (std::size_t i = 0; i < batch; ++i) {
+            const PendingSend& pending = send_batch_[sent + i];
+            send_vectors_[i].iov_base = const_cast<std::uint8_t*>(pending.data);
+            send_vectors_[i].iov_len = pending.length;
+
+            std::memset(&send_messages_[i], 0, sizeof(send_messages_[i]));
+            send_messages_[i].msg_hdr.msg_iov = &send_vectors_[i];
+            send_messages_[i].msg_hdr.msg_iovlen = 1;
+            send_messages_[i].msg_hdr.msg_name = const_cast<sockaddr*>(peer_.sockaddr_ptr());
+            send_messages_[i].msg_hdr.msg_namelen = peer_.sockaddr_len();
         }
-        if (count == 0) break;
-        sent += static_cast<std::size_t>(count);
-    }
+
+        int count =
+            ::sendmmsg(socket_.get(), send_messages_.data(), static_cast<unsigned>(batch), 0);
 #else
-    for (const std::vector<std::uint8_t>& datagram : send_batch_) {
-        ssize_t written = ::sendto(socket_.get(), datagram.data(), datagram.size(), 0,
+        const PendingSend& pending = send_batch_[sent];
+        ssize_t written = ::sendto(socket_.get(), pending.data, pending.length, 0,
                                    peer_.sockaddr_ptr(), peer_.sockaddr_len());
-        if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR &&
-            errno != ECONNREFUSED) {
-            fail_errno("sendto the peer failed");
-        }
-    }
+        int count = (written < 0) ? -1 : 1;
 #endif
 
-    send_batch_.clear();
+        if (count > 0) {
+            sent += static_cast<std::size_t>(count);
+            stats_.packets_sent += static_cast<std::uint64_t>(count);
+            continue;
+        }
+
+        if (errno == EINTR) continue;
+
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            // Two short waits, then give up for this round. Holding on longer would
+            // stop the receive path from running, and the acknowledgements arriving
+            // there are what will free the window anyway.
+            if (++stalls > 2) break;
+            (void)wait_writable(socket_.get(), 1);
+            continue;
+        }
+
+        // ECONNREFUSED here is an ICMP port-unreachable from an earlier datagram,
+        // which is informational on an unconnected socket: the peer may simply not
+        // have finished binding yet.
+        if (errno == ECONNREFUSED) {
+            ++sent;
+            continue;
+        }
+
+        fail_errno("sending to the peer failed");
+    }
+
+    // Keep whatever did not go out, so it is retried rather than lost.
+    send_batch_.erase(send_batch_.begin(), send_batch_.begin() + static_cast<std::ptrdiff_t>(sent));
+
+    // The staging area can only be reused once nothing still points into it.
+    if (send_batch_.empty()) control_used_ = 0;
 }
 
 void ReliableUdpChannel::update_rtt(std::uint64_t sample_us) {

@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "dz/frame.hpp"
@@ -36,6 +37,9 @@ enum class ConnectionState : std::uint8_t {
 
 const char* connection_state_name(ConnectionState state);
 
+class Connection;
+using ConnectionPtr = std::shared_ptr<Connection>;
+
 class Connection {
 public:
     Connection(Fd fd, std::uint64_t id, unsigned shard_index);
@@ -51,7 +55,15 @@ public:
     /// A log-safe label for this connection. See dz::log::describe_peer.
     const std::string& label() const { return label_; }
 
-    ConnectionState state = ConnectionState::AwaitingHello;
+    /// Where this connection is in the conversation.
+    ///
+    /// Atomic because a shard other than the owner writes it. Matching a sender
+    /// sets the receiver's state to ReceiverMatched from the sender's shard;
+    /// opening a relay sets both sides to Relaying from whichever shard handled
+    /// the second RelayOpen. A plain enum would be a data race, and a race that
+    /// lost the Relaying store would reject the first RelayData and RST the
+    /// transfer.
+    std::atomic<ConnectionState> state{ConnectionState::AwaitingHello};
 
     /// The hello this peer sent, kept only while the connection is open.
     ClientHello hello;
@@ -60,11 +72,17 @@ public:
     /// Username this connection has claimed in the session table, empty if none.
     std::string claimed_username;
 
-    /// Pairing this connection belongs to, 0 if none.
-    std::uint64_t pairing_id = 0;
+    /// Pairing this connection belongs to, 0 if none. Atomic for the same reason
+    /// as `state`: the sender's shard stamps the id onto the receiver.
+    std::atomic<std::uint64_t> pairing_id{0};
 
-    /// The peer this connection is relaying to or from.
-    std::weak_ptr<Connection> relay_peer;
+    /// Record that this connection forwards to `peer`. Must be called on both
+    /// sides before either is marked Relaying, so a RelayData that observes
+    /// Relaying is guaranteed to find a peer rather than closing the connection.
+    void attach_relay_peer(const ConnectionPtr& peer);
+
+    /// The peer this connection is relaying to, or nullptr.
+    ConnectionPtr relay_peer() const;
 
     /// Address the server observed for this connection.
     ///
@@ -120,8 +138,8 @@ public:
     /// Request an orderly shutdown, from any thread. The owning shard performs
     /// it once it has flushed whatever is already queued.
     void request_close(std::string_view reason);
-    bool close_requested() const { return close_requested_.load(std::memory_order_relaxed); }
-    const std::string& close_reason() const { return close_reason_; }
+    bool close_requested() const { return close_requested_.load(std::memory_order_acquire); }
+    std::string close_reason() const;
 
     /// True once the peer has closed its half and the input buffer is drained.
     bool peer_closed() const { return peer_closed_; }
@@ -142,10 +160,13 @@ private:
 
     std::atomic<bool> read_paused_{false};
     std::atomic<bool> close_requested_{false};
+
+    mutable std::mutex relay_mutex_;
+    std::weak_ptr<Connection> relay_peer_;
+
+    mutable std::mutex close_mutex_;
     std::string close_reason_;
 };
-
-using ConnectionPtr = std::shared_ptr<Connection>;
 
 /// Bytes of queued output at which a relay stops reading from the other side,
 /// and the level it must fall back to before reading resumes.

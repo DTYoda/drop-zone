@@ -52,7 +52,7 @@ void write_private_file(const std::string& path, const std::string& contents) {
     if (raw < 0) fail_errno("cannot create '" + temporary + "'");
 
     Fd fd(raw);
-    write_all(fd.get(), contents.data(), contents.size());
+    write_file_all(fd.get(), contents.data(), contents.size());
     fsync_file(fd.get());
     fd.reset();
 

@@ -135,10 +135,21 @@ void send_plaintext(Channel& channel, const Manifest& manifest,
         encode_chunk_header(header, chunk_header);
 
         if (can_splice) {
-            // Frame header and chunk header in one write, then the payload without
-            // it ever entering this address space.
-            channel.write_frame(MessageType::Chunk, chunk_header, sizeof(chunk_header),
-                                /*flags=*/1);
+            // The frame header has to declare the payload sendfile is about to
+            // supply, not just the chunk header written here, or the receiver would
+            // stop reading 1 MiB short and treat the file's bytes as the next frame.
+            FrameHeader frame;
+            frame.type = MessageType::Chunk;
+            frame.flags = 1;
+            frame.length = static_cast<std::uint32_t>(kChunkHeaderSize) + chunk.length;
+
+            std::uint8_t frame_bytes[kFrameHeaderSize];
+            encode_frame_header(frame, frame_bytes);
+
+            // Both headers in one write, then the payload straight from the page
+            // cache to the socket without entering this address space at all.
+            channel.write_pair(frame_bytes, sizeof(frame_bytes), chunk_header,
+                               sizeof(chunk_header));
             sendfile_all(socket_fd, plain_fd.get(), chunk.offset, chunk.length);
         } else {
             std::vector<std::uint8_t> payload(kChunkHeaderSize + chunk.length);

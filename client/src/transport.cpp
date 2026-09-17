@@ -96,6 +96,9 @@ Fd bind_udp(std::uint16_t port) {
         }
     }
 
+    // Every UDP path here -- reflexive discovery, punching, the reliable stream --
+    // drains the socket until EAGAIN, so it must never block.
+    set_nonblocking(socket_fd.get(), true);
     return socket_fd;
 }
 
@@ -142,12 +145,23 @@ LocalSockets open_local_sockets(bool include_loopback) {
 void discover_reflexive_address(LocalSockets& sockets, const Endpoint& server_endpoint) {
     std::uint8_t reply[kMaxReflexiveReplySize];
 
+    // The control connection may have resolved the server to an IPv4 address while
+    // this socket is dual-stack IPv6, so the target has to be put into a form the
+    // socket can reach.
+    Endpoint target;
+    if (!adapt_endpoint_for_socket(server_endpoint, local_endpoint(sockets.udp_socket.get()).family(),
+                                   target)) {
+        log::debug("the server's address is not reachable from the UDP socket; "
+                   "skipping reflexive discovery");
+        return;
+    }
+
     // Three tries. The probe is a single datagram, so a lost one is entirely
     // ordinary and one retry short of enough.
     for (int attempt = 0; attempt < 3; ++attempt) {
-        ssize_t written = ::sendto(sockets.udp_socket.get(), kReflexiveProbeMagic,
-                                   sizeof(kReflexiveProbeMagic), 0,
-                                   server_endpoint.sockaddr_ptr(), server_endpoint.sockaddr_len());
+        ssize_t written =
+            ::sendto(sockets.udp_socket.get(), kReflexiveProbeMagic,
+                     sizeof(kReflexiveProbeMagic), 0, target.sockaddr_ptr(), target.sockaddr_len());
         if (written < 0) continue;
 
         if (!wait_readable(sockets.udp_socket.get(), 400)) continue;

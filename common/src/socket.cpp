@@ -8,6 +8,7 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <signal.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -263,6 +264,42 @@ bool Endpoint::operator==(const Endpoint& other) const noexcept {
     return true;
 }
 
+Endpoint Endpoint::as_v4_mapped() const {
+    if (storage_.ss_family != AF_INET) return *this;
+
+    const auto* v4 = reinterpret_cast<const sockaddr_in*>(&storage_);
+
+    sockaddr_in6 v6{};
+    v6.sin6_family = AF_INET6;
+    v6.sin6_port = v4->sin_port;
+    // ::ffff:0:0/96 is the mapping prefix: eighty zero bits, sixteen one bits,
+    // then the IPv4 address.
+    v6.sin6_addr.s6_addr[10] = 0xff;
+    v6.sin6_addr.s6_addr[11] = 0xff;
+    std::memcpy(v6.sin6_addr.s6_addr + 12, &v4->sin_addr, 4);
+
+    Endpoint mapped;
+    std::memcpy(&mapped.storage_, &v6, sizeof(v6));
+    mapped.len_ = sizeof(v6);
+    return mapped;
+}
+
+bool adapt_endpoint_for_socket(const Endpoint& target, int socket_family, Endpoint& out) {
+    if (target.family() == socket_family) {
+        out = target;
+        return true;
+    }
+
+    if (socket_family == AF_INET6 && target.family() == AF_INET) {
+        out = target.as_v4_mapped();
+        return true;
+    }
+
+    // An IPv4 socket can only reach an IPv6 address if it is really an IPv4 one in
+    // disguise -- and from_sockaddr already unwraps those, so nothing reaches here.
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // Socket options
 // ---------------------------------------------------------------------------
@@ -413,6 +450,33 @@ bool wait_for(int fd, short events, int timeout_ms) {
 }  // namespace
 
 bool wait_readable(int fd, int timeout_ms) { return wait_for(fd, POLLIN, timeout_ms); }
+
+bool wait_readable_micros(int fd, std::uint64_t timeout_us) {
+#if defined(DZ_PLATFORM_LINUX)
+    pollfd entry{};
+    entry.fd = fd;
+    entry.events = POLLIN;
+
+    timespec timeout{};
+    timeout.tv_sec = static_cast<time_t>(timeout_us / 1'000'000);
+    timeout.tv_nsec = static_cast<long>((timeout_us % 1'000'000) * 1000);
+
+    for (;;) {
+        int rc = ::ppoll(&entry, 1, &timeout, nullptr);
+        if (rc > 0) return true;
+        if (rc == 0) return false;
+        if (errno != EINTR) fail_errno("ppoll failed");
+        // Resuming with the same timeout after a signal is close enough: the caller
+        // is pacing, not measuring.
+    }
+#else
+    // Rounded up, because a zero-millisecond poll would not wait at all and the
+    // caller would spin.
+    int timeout_ms = static_cast<int>((timeout_us + 999) / 1000);
+    if (timeout_ms < 1) timeout_ms = 1;
+    return wait_for(fd, POLLIN, timeout_ms);
+#endif
+}
 
 bool wait_writable(int fd, int timeout_ms) { return wait_for(fd, POLLOUT, timeout_ms); }
 

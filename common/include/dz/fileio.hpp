@@ -67,6 +67,13 @@ private:
 /// transfer that will not fit fails now rather than at 90%.
 void preallocate_file(int fd, std::uint64_t size);
 
+/// Write `len` bytes to a file, looping over short writes.
+///
+/// Separate from dz::write_all, which is for sockets and goes through send() so it
+/// can pass MSG_NOSIGNAL. send() fails with ENOTSOCK on a regular file, so the two
+/// are not interchangeable.
+void write_file_all(int fd, const void* data, std::size_t len);
+
 /// Write `len` bytes at `offset`, looping over short writes. Safe to call
 /// concurrently on the same descriptor at non-overlapping offsets.
 void pwrite_all(int fd, const void* data, std::size_t len, std::uint64_t offset);

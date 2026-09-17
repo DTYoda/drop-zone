@@ -4,9 +4,9 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -39,7 +39,7 @@ void write_sealed_file(const std::string& path, const std::vector<std::uint8_t>&
     if (raw < 0) fail_errno("cannot create '" + temporary + "'");
 
     Fd fd(raw);
-    write_all(fd.get(), contents.data(), contents.size());
+    write_file_all(fd.get(), contents.data(), contents.size());
     fsync_file(fd.get());
     fd.reset();
 
@@ -135,6 +135,32 @@ Identity unlock_identity(const Config& config, std::string_view private_password
 // Terminal input
 // ---------------------------------------------------------------------------
 
+/// Read one line from standard input, a byte at a time.
+///
+/// Every prompt in drop-zone reads this way, passwords included. A buffered
+/// stream cannot be mixed in here: std::cin would read ahead past the end of the
+/// line into its own buffer, and the next raw read would find the input already
+/// consumed -- which is exactly what happens when the client is driven from a pipe
+/// or a script rather than a terminal.
+///
+/// `into` is a template so the same loop serves both std::string for ordinary
+/// input and SecretString for a password, without a password ever passing through
+/// a buffer that is not wiped.
+template <typename StringType>
+void read_raw_line(StringType& into) {
+    for (;;) {
+        char c = 0;
+        ssize_t got = ::read(STDIN_FILENO, &c, 1);
+        if (got < 0) {
+            if (errno == EINTR) continue;
+            return;
+        }
+        if (got == 0 || c == '\n') return;
+        if (c == '\r') continue;
+        into.push_back(c);
+    }
+}
+
 SecretString read_password(std::string_view prompt) {
     SecretString password;
 
@@ -153,19 +179,7 @@ SecretString read_password(std::string_view prompt) {
         }
     }
 
-    // Read a byte at a time straight into the secret string, so the password
-    // never lands in a std::string that would not be wiped.
-    for (;;) {
-        char c = 0;
-        ssize_t got = ::read(STDIN_FILENO, &c, 1);
-        if (got < 0) {
-            if (errno == EINTR) continue;
-            break;
-        }
-        if (got == 0 || c == '\n') break;
-        if (c == '\r') continue;
-        password.push_back(c);
-    }
+    read_raw_line(password);
 
     if (echo_disabled) {
         (void)::tcsetattr(STDIN_FILENO, TCSAFLUSH, &original);
@@ -202,7 +216,7 @@ std::string read_line(std::string_view prompt, std::string_view fallback) {
     }
 
     std::string line;
-    if (!std::getline(std::cin, line)) return std::string(fallback);
+    read_raw_line(line);
 
     while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
     if (line.empty()) return std::string(fallback);
