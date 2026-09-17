@@ -123,6 +123,8 @@ if(DZ_BUILD_CLIENT)
     install(FILES packaging/man/drop-zone.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 endif()
 
+install(FILES LICENSE README.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
 if(DZ_BUILD_SERVER)
     install(TARGETS drop-zone-server RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
