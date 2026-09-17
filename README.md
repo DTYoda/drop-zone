@@ -29,11 +29,10 @@ Needs a C++20 compiler, CMake 3.16+, and OpenSSL 1.1.1+ (3.x is fine). On Debian
 ### Homebrew
 
 ```sh
-brew tap DTYoda/tap
-brew install drop-zone
+brew install DTYoda/tap/drop-zone
 ```
 
-Or in one step: `brew install DTYoda/tap/drop-zone`. The formula builds with `-DDZ_BUILD_SERVER=OFF`, so a `brew install` never places the daemon on a user's machine. To follow `main` instead of the latest tag: `brew install --HEAD DTYoda/tap/drop-zone`.
+That taps [DTYoda/homebrew-tap](https://github.com/DTYoda/homebrew-tap) and trusts only this formula (Homebrew 7 requires that for third-party taps). The formula builds with `-DDZ_BUILD_SERVER=OFF`, so a `brew install` never places the daemon on a user's machine. To follow `main` instead of the latest tag: `brew install --HEAD DTYoda/tap/drop-zone`.
 
 ### First run
 

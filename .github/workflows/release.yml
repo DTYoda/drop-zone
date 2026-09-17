@@ -50,8 +50,7 @@ jobs:
           ## Install
 
           \`\`\`sh
-          brew tap DTYoda/tap
-          brew install drop-zone
+          brew install DTYoda/tap/drop-zone
           \`\`\`
 
           ## Source archive for packagers
