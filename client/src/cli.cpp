@@ -31,6 +31,7 @@ Command parse_command(const char* text) {
     if (std::strcmp(text, "send") == 0) return Command::Send;
     if (std::strcmp(text, "whoami") == 0) return Command::WhoAmI;
     if (std::strcmp(text, "status") == 0) return Command::Status;
+    if (std::strcmp(text, "set-server") == 0) return Command::SetServer;
     if (std::strcmp(text, "help") == 0) return Command::Help;
     if (std::strcmp(text, "version") == 0) return Command::Version;
     return Command::None;
@@ -79,6 +80,7 @@ void print_help(const char* error) {
         "  send FILE... -t USER     send files or directories to USER.\n"
         "  whoami                   print this machine's username and fingerprint.\n"
         "  status                   print the configuration and what this build can do.\n"
+        "  set-server HOST[:PORT]   permanently change the rendezvous server.\n"
         "\n"
         "Send options:\n"
         "  -t, --target=USER        username to send to.\n"
@@ -99,6 +101,7 @@ void print_help(const char* error) {
         "      --verify             hash every file and compare. Costs an extra read pass\n"
         "                           on both sides.\n"
         "      --server=HOST[:PORT] use a different rendezvous server for this run.\n"
+        "                           During setup, this is written into the config.\n"
         "      --force-transport=T  insist on one path: tcp, udp or relay. Without this,\n"
         "                           drop-zone tries all three in that order.\n"
         "      --config-dir=DIR     use a different configuration directory.\n"
@@ -115,7 +118,8 @@ void print_help(const char* error) {
         "  drop-zone setup\n"
         "  drop-zone accept -o ~/Downloads\n"
         "  drop-zone send report.pdf -t alice\n"
-        "  drop-zone send ./photos -t bob -p hunter2\n");
+        "  drop-zone send ./photos -t bob -p hunter2\n"
+        "  drop-zone set-server 192.0.2.10\n");
 
     std::exit((error != nullptr) ? 1 : 0);
 }
@@ -248,6 +252,16 @@ CommandLine parse_command_line(int argc, char* argv[]) {
 
         case Command::Accept:
             if (!parsed.inputs.empty()) print_help("`accept` takes no file arguments");
+            break;
+
+        case Command::SetServer:
+            if (parsed.inputs.size() != 1) {
+                print_help("`set-server` needs HOST or HOST:PORT");
+            }
+            parse_server(parsed.inputs[0].c_str(), parsed.server_host, parsed.server_port);
+            if (parsed.server_host.empty()) {
+                print_help("`set-server` needs HOST or HOST:PORT");
+            }
             break;
 
         default:

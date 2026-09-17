@@ -26,6 +26,10 @@
 
 namespace dz {
 
+/// Official public rendezvous server. Clients use this unless the user
+/// overrides it with `drop-zone set-server` or `--server`.
+constexpr const char* kDefaultServerHost = "129.153.161.241";
+
 /// Default port for the rendezvous server. Unassigned by IANA.
 constexpr std::uint16_t kDefaultServerPort = 47654;
 
