@@ -44,13 +44,10 @@ These are the usual blockers for Homebrew, AUR, Nix, and Debian:
 The client is on a personal tap:
 
 ```sh
-brew tap DTYoda/tap
-brew install drop-zone
+brew install DTYoda/tap/drop-zone
 ```
 
-The tap is [DTYoda/homebrew-tap](https://github.com/DTYoda/homebrew-tap)
-(`Formula/drop-zone.rb`). Keep that file in lockstep with
-`packaging/homebrew/drop-zone.rb` in this repo.
+The fully qualified name taps [DTYoda/homebrew-tap](https://github.com/DTYoda/homebrew-tap) and trusts only this formula. After that, `brew install drop-zone` works if you also `brew trust --formula DTYoda/tap/drop-zone`. Keep `Formula/drop-zone.rb` in that tap in lockstep with `packaging/homebrew/drop-zone.rb` in this repo.
 
 Homebrew-core is the next step: it needs a few clean tagged releases,
 `brew audit --new`, and `brew test drop-zone`. See
