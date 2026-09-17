@@ -19,11 +19,12 @@ namespace dz::client {
 
 enum class Command {
     None,
-    Setup,   ///< Create or update the local configuration and identity.
-    Accept,  ///< Wait for incoming transfers.
-    Send,    ///< Send files to a username.
-    WhoAmI,  ///< Print this installation's username and fingerprint.
-    Status,  ///< Print the configuration and what this build can do.
+    Setup,      ///< Create or update the local configuration and identity.
+    Accept,     ///< Wait for incoming transfers.
+    Send,       ///< Send files to a username.
+    WhoAmI,     ///< Print this installation's username and fingerprint.
+    Status,     ///< Print the configuration and what this build can do.
+    SetServer,  ///< Permanently change the rendezvous server in the config.
     Help,
     Version,
 };

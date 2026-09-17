@@ -42,7 +42,7 @@ drop-zone accept -o ~/Downloads          # receiver
 drop-zone send report.pdf -t alice       # sender
 ```
 
-`setup` asks for a username, a rendezvous server, a private password (seals the identity keystore) and a public password (what senders type to prove they are allowed to reach you). Neither password is stored in the clear; the public password is not stored at all.
+`setup` asks for a username, a private password (seals the identity keystore) and a public password (what senders type to prove they are allowed to reach you). Neither password is stored in the clear; the public password is not stored at all. The official public rendezvous server (`129.153.161.241`) is used by default; change it later with `drop-zone set-server HOST[:PORT]`.
 
 ## Commands
 
@@ -53,6 +53,7 @@ drop-zone send report.pdf -t alice       # sender
 | `send FILE... -t USER` | Send files or directories |
 | `whoami` | Print this machine's username and identity fingerprint |
 | `status` | Print the configuration and which cipher this CPU will use |
+| `set-server HOST[:PORT]` | Permanently change the rendezvous server |
 
 Useful flags, also listed in `drop-zone --help`:
 
@@ -60,7 +61,7 @@ Useful flags, also listed in `drop-zone --help`:
 - `--no-encrypt` to skip payload encryption (refused on the relay)
 - `--verify` to hash every file as well as authenticating the chunks
 - `--force-transport=tcp\|udp\|relay` to skip the ladder
-- `--server=HOST[:PORT]` and `--config-dir=DIR` for tests
+- `--server=HOST[:PORT]` and `--config-dir=DIR` for tests (or `set-server` to keep the change)
 
 Passwords prompted on the terminal are not echoed. Passing `-p` puts the public password in the shell history; omit it and drop-zone will ask.
 
@@ -88,7 +89,7 @@ cmake --build build --parallel
 
 `server/deploy/` has a systemd unit and a Dockerfile. The daemon writes nothing to disk, keeps no accounts, and will not log an address. `--no-relay` turns it into a pure introduction service.
 
-Default port is **47654**.
+Default port is **47654**. The official public server is **129.153.161.241**.
 
 ## Build and test
 
