@@ -22,7 +22,7 @@ namespace dz::client {
 
 struct Config {
     std::string username;
-    std::string server_host;
+    std::string server_host = kDefaultServerHost;
     std::uint16_t server_port = kDefaultServerPort;
 
     /// Where received files go when `accept` is given no -o.

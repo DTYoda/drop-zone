@@ -92,9 +92,8 @@ Relaying.
 
 ## Framing and copies
 
-The C prototype scanned for `"\n\n"` in a 1 KiB buffer. The rewrite uses
-an explicit length, so a receiver sizes its read in one call and a file
-byte that happens to be a newline cannot truncate a message.
+Frames carry an explicit length, so a receiver sizes its read in one call
+and a file byte that happens to be a newline cannot truncate a message.
 
 Copies that were removed on the hot path:
 

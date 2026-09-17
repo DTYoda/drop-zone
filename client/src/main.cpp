@@ -92,20 +92,15 @@ int command_setup(const CommandLine& args) {
                              "and '.', and may not start with '.'.\n");
     }
 
-    std::string server = read_line("Rendezvous server [drop-zone.example.net]: ",
-                                   "drop-zone.example.net");
-    std::uint16_t port = kDefaultServerPort;
-
-    std::size_t colon = server.rfind(':');
-    if (colon != std::string::npos && server.find(':') == colon) {
-        std::string port_text = server.substr(colon + 1);
-        server = server.substr(0, colon);
-        port = static_cast<std::uint16_t>(std::strtoul(port_text.c_str(), nullptr, 10));
-        if (port == 0) port = kDefaultServerPort;
+    // The official public server unless setup was given --server, which writes
+    // that host into the config. Change it later with `drop-zone set-server`.
+    if (!args.server_host.empty()) {
+        config.server_host = args.server_host;
+        config.server_port = args.server_port != 0 ? args.server_port : kDefaultServerPort;
+    } else {
+        config.server_host = kDefaultServerHost;
+        config.server_port = kDefaultServerPort;
     }
-
-    config.server_host = server;
-    config.server_port = port;
 
     std::string output = read_line("Save received files in [the current directory]: ", "");
     config.default_output_directory = output.empty() ? "" : expand_user_path(output);
@@ -140,6 +135,7 @@ int command_setup(const CommandLine& args) {
                  "\nDone.\n"
                  "\n"
                  "  username:    %s\n"
+                 "  server:      %s:%u\n"
                  "  fingerprint: %s\n"
                  "  config:      %s\n"
                  "\n"
@@ -147,8 +143,10 @@ int command_setup(const CommandLine& args) {
                  "how they can confirm it is really you -- read it out to them once and\n"
                  "drop-zone will check it on every transfer from then on.\n"
                  "\n"
-                 "Now run `drop-zone accept` to start receiving.\n",
-                 config.username.c_str(), identity.fingerprint().c_str(),
+                 "Now run `drop-zone accept` to start receiving. To use a different\n"
+                 "rendezvous server later, run `drop-zone set-server HOST[:PORT]`.\n",
+                 config.username.c_str(), config.server_host.c_str(),
+                 static_cast<unsigned>(config.server_port), identity.fingerprint().c_str(),
                  config.config_path().c_str());
 
     return 0;
@@ -217,6 +215,22 @@ int command_status(const CommandLine& args) {
                     fingerprint_of(peer.identity_key).c_str());
     }
 
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// set-server
+// ---------------------------------------------------------------------------
+
+int command_set_server(const CommandLine& args) {
+    Config config = load_config(resolve_config_directory(args));
+
+    config.server_host = args.server_host;
+    config.server_port = args.server_port != 0 ? args.server_port : kDefaultServerPort;
+    save_config(config);
+
+    std::fprintf(stderr, "Rendezvous server is now %s:%u\n", config.server_host.c_str(),
+                 static_cast<unsigned>(config.server_port));
     return 0;
 }
 
@@ -428,6 +442,7 @@ int run(int argc, char* argv[]) {
         case Command::Send: return command_send(args);
         case Command::WhoAmI: return command_whoami(args);
         case Command::Status: return command_status(args);
+        case Command::SetServer: return command_set_server(args);
         case Command::Version:
             std::printf("drop-zone %s\n", DZ_VERSION_STRING);
             return 0;

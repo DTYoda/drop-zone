@@ -4,7 +4,7 @@ Send files straight to another person's terminal, wherever they are.
 
 A receiver runs `drop-zone accept`. A sender runs `drop-zone send report.pdf -t alice`. The two machines find each other through a rendezvous server that never sees a password, a filename or a file byte, then transfer the data on the best path they can open: a direct TCP connection, a hole-punched UDP stream, or — only if both of those fail — a relay of ciphertext through the server.
 
-This tree is a C++20 rewrite of the original C prototype. The client is meant to be Homebrew-installable; the server is a separate, storage-free daemon an operator runs.
+The client is C++20 and meant to be Homebrew-installable; the server is a separate, storage-free daemon an operator runs.
 
 ## What you get
 
@@ -26,13 +26,15 @@ sudo cmake --install build
 
 Needs a C++20 compiler, CMake 3.16+, and OpenSSL 1.1.1+ (3.x is fine). On Debian/Ubuntu that is `g++ cmake libssl-dev`.
 
-The in-tree Homebrew formula builds the same way:
+### Homebrew
+
+Until the first tagged release, the in-tree formula is HEAD-only and still builds with `-DDZ_BUILD_SERVER=OFF`, so `brew install` never places the daemon on a user's machine:
 
 ```sh
-brew install --build-from-source packaging/homebrew/drop-zone.rb
+brew install --HEAD ./packaging/homebrew/drop-zone.rb
 ```
 
-It configures with `-DDZ_BUILD_SERVER=OFF`, so a `brew install` never places the daemon on a user's machine.
+After a `v*` tag, copy `packaging/homebrew/drop-zone.rb` into a tap (see [packaging/README.md](packaging/README.md)) so installs become `brew tap DTYoda/tap && brew install drop-zone`.
 
 ### First run
 
@@ -42,7 +44,7 @@ drop-zone accept -o ~/Downloads          # receiver
 drop-zone send report.pdf -t alice       # sender
 ```
 
-`setup` asks for a username, a rendezvous server, a private password (seals the identity keystore) and a public password (what senders type to prove they are allowed to reach you). Neither password is stored in the clear; the public password is not stored at all.
+`setup` asks for a username, a private password (seals the identity keystore) and a public password (what senders type to prove they are allowed to reach you). Neither password is stored in the clear; the public password is not stored at all. The official public rendezvous server (`129.153.161.241`) is used by default; change it later with `drop-zone set-server HOST[:PORT]`.
 
 ## Commands
 
@@ -53,6 +55,7 @@ drop-zone send report.pdf -t alice       # sender
 | `send FILE... -t USER` | Send files or directories |
 | `whoami` | Print this machine's username and identity fingerprint |
 | `status` | Print the configuration and which cipher this CPU will use |
+| `set-server HOST[:PORT]` | Permanently change the rendezvous server |
 
 Useful flags, also listed in `drop-zone --help`:
 
@@ -90,7 +93,7 @@ cmake --build build --parallel
 
 `server/deploy/` has a systemd unit and a Dockerfile. The daemon writes nothing to disk, keeps no accounts, and will not log an address. `--no-relay` turns it into a pure introduction service.
 
-Default port is **47654**.
+Default port is **47654**. The official public server is **129.153.161.241**.
 
 ## Build and test
 
@@ -115,7 +118,7 @@ client/     drop-zone: identity, transport ladder, data plane, CLI
 server/     drop-zone-server: sharded event loop, claims, relay
 tests/      unit tests and the loopback e2e script
 docs/       protocol, security, performance
-packaging/  Homebrew formula and the client man page
+packaging/  Homebrew formula, release checklist, and the client man page
 ```
 
 ## Configuration
@@ -127,3 +130,7 @@ Lives in `$DROP_ZONE_HOME`, else `$XDG_CONFIG_HOME/drop-zone`, else `~/.config/d
 | `config.toml` | 0600 | username, server, preferences. No secrets. |
 | `identity.key` | 0600 | Ed25519 private key, sealed with scrypt + AES-256-GCM (or ChaCha20-Poly1305) under the private password |
 | `known_peers` | 0600 | TOFU pins, one username and fingerprint per line |
+
+## License
+
+MIT. See [LICENSE](LICENSE).

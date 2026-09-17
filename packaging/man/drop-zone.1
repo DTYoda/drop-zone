@@ -26,7 +26,9 @@ Writes
 .I ~/.config/drop-zone/config.toml
 and a sealed
 .I identity.key
-with mode 0600.
+with mode 0600. Uses the official public rendezvous server unless
+.B \-\-server
+is given.
 .TP
 .B accept
 Wait for incoming files and save them. Prompts before each transfer unless
@@ -46,6 +48,11 @@ Print this machine's username and identity fingerprint.
 .B status
 Print the configuration and what this build can do, including which AEAD the
 CPU will use.
+.TP
+.B set-server
+.I HOST[:PORT]
+Permanently change the rendezvous server written in
+.IR config.toml .
 .SH OPTIONS
 .SS Send options
 .TP
@@ -81,7 +88,9 @@ default: in encrypted mode each chunk's authentication tag already proves its
 bytes.
 .TP
 .BR \-\-server = HOST [: PORT ]
-Use a different rendezvous server for this run.
+Use a different rendezvous server for this run. During
+.B setup
+this is written into the configuration instead.
 .TP
 .BR \-\-force\-transport = T
 Insist on one path:
@@ -139,5 +148,7 @@ useless in real use, because a peer cannot reach our loopback.
 .SH SEE ALSO
 Full protocol, security and performance notes live in the source tree under
 .IR docs/ .
+.SH LICENSE
+MIT.
 .SH AUTHORS
 drop-zone
