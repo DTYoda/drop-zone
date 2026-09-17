@@ -13,7 +13,8 @@ add_library(dz_common STATIC
     src/frame.cpp
     src/log.cpp
     src/protocol.cpp
-    src/secure.cpp)
+    src/secure.cpp
+    src/socket.cpp)
 
 target_include_directories(dz_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 

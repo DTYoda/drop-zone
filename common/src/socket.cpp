@@ -46,6 +46,29 @@ Endpoint Endpoint::from_sockaddr(const sockaddr* addr, socklen_t len) {
     }
     std::memcpy(&endpoint.storage_, addr, len);
     endpoint.len_ = len;
+
+    // A dual-stack listening socket reports an IPv4 client as the mapped address
+    // ::ffff:1.2.3.4. Left in that form it would be handed to the other peer as a
+    // candidate that only an AF_INET6 socket can reach, so it is unwrapped back
+    // into the plain IPv4 address it stands for.
+    if (endpoint.storage_.ss_family == AF_INET6) {
+        const auto* v6 = reinterpret_cast<const sockaddr_in6*>(&endpoint.storage_);
+        if (IN6_IS_ADDR_V4MAPPED(&v6->sin6_addr)) {
+            std::uint16_t port = v6->sin6_port;
+            in_addr v4_address{};
+            std::memcpy(&v4_address, v6->sin6_addr.s6_addr + 12, 4);
+
+            sockaddr_in v4{};
+            v4.sin_family = AF_INET;
+            v4.sin_port = port;
+            v4.sin_addr = v4_address;
+
+            std::memset(&endpoint.storage_, 0, sizeof(endpoint.storage_));
+            std::memcpy(&endpoint.storage_, &v4, sizeof(v4));
+            endpoint.len_ = sizeof(v4);
+        }
+    }
+
     return endpoint;
 }
 

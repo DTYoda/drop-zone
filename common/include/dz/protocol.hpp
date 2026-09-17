@@ -98,6 +98,32 @@ const char* transport_kind_name(TransportKind kind);
 bool parse_transport_kind(std::string_view text, TransportKind& out);
 
 // ---------------------------------------------------------------------------
+// Reflexive address discovery
+//
+// A peer behind NAT cannot see the address and port its own packets appear to
+// come from, and hole punching needs exactly that. The server answers a
+// four-byte probe with the source address it observed, which is the one useful
+// thing only an outside observer can report.
+//
+// This exchange is completely stateless: the reply is computed from the packet's
+// own source address and nothing is recorded, so it adds no session state to the
+// server and no address to its memory beyond the moment the datagram is handled.
+// ---------------------------------------------------------------------------
+
+constexpr std::uint8_t kReflexiveProbeMagic[4] = {'D', 'Z', 'R', '1'};
+constexpr std::uint8_t kReflexiveReplyMagic[4] = {'D', 'Z', 'R', '2'};
+constexpr std::size_t kReflexiveProbeSize = 4;
+constexpr std::size_t kMaxReflexiveReplySize = 32;
+
+/// Build the reply to a reflexive probe: the magic followed by the encoded
+/// source endpoint. Returns the number of bytes written.
+std::size_t encode_reflexive_reply(const Endpoint& observed, std::uint8_t* out,
+                                   std::size_t capacity);
+
+/// Parse a reflexive reply. Returns false if it is not one.
+bool decode_reflexive_reply(const std::uint8_t* data, std::size_t len, Endpoint& out);
+
+// ---------------------------------------------------------------------------
 // Control-plane messages
 // ---------------------------------------------------------------------------
 
@@ -148,6 +174,9 @@ struct SendRequest {
     /// Proof that the sender knows the target's public password, MAC-ed over the
     /// transcript so it cannot be replayed into another session.
     std::uint8_t proof[kSha256Size]{};
+    /// The sender's --force-transport, passed through to the receiver so both
+    /// peers run the same ladder. A test knob, not a security control.
+    TransportKind transport_hint = TransportKind::None;
 
     std::vector<std::uint8_t> encode() const;
     static SendRequest decode(const std::vector<std::uint8_t>& payload);
@@ -168,6 +197,11 @@ struct PeerIntroduction {
     std::uint8_t signature[kEd25519SignatureSize]{};
     /// Opaque token identifying this pairing, used to open a relay.
     std::uint64_t pairing_id = 0;
+    /// A transport tier the peer insists on, from its --force-transport. Carried
+    /// so both peers run the same ladder; None means "try them all in order".
+    /// Not covered by the password proofs because forcing a tier cannot weaken
+    /// the session: every tier carries the same end-to-end encrypted stream.
+    TransportKind transport_hint = TransportKind::None;
 
     std::vector<std::uint8_t> encode() const;
     static PeerIntroduction decode(const std::vector<std::uint8_t>& payload);
@@ -206,6 +240,12 @@ struct TransferOffer {
     bool encrypt_payload = true;
     AeadAlgorithm algorithm = AeadAlgorithm::Aes256Gcm;
     std::uint32_t chunk_size = kDefaultChunkSize;
+    /// True when the sender hashed every file up front and filled in the digest
+    /// fields. Off by default: hashing costs a whole extra read pass, and in
+    /// encrypted mode each chunk's authentication tag already proves its bytes
+    /// while the authenticated counter sequence proves none are missing. See
+    /// docs/SECURITY.md.
+    bool digests_present = false;
 
     std::vector<std::uint8_t> encode() const;
     static TransferOffer decode(const std::uint8_t* data, std::size_t len);

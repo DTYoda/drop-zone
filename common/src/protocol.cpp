@@ -115,6 +115,7 @@ std::vector<std::uint8_t> SendRequest::encode() const {
     PayloadWriter writer;
     writer.put_string(target_username);
     writer.put_bytes(proof, sizeof(proof));
+    writer.put_u8(static_cast<std::uint8_t>(transport_hint));
     return writer.take();
 }
 
@@ -127,6 +128,12 @@ SendRequest SendRequest::decode(const std::vector<std::uint8_t>& payload) {
         fail("SendRequest names an invalid username");
     }
     reader.take_fixed(request.proof, sizeof(request.proof));
+
+    std::uint8_t hint = reader.take_u8();
+    if (hint > static_cast<std::uint8_t>(TransportKind::ServerRelay)) {
+        fail("SendRequest names an unknown transport");
+    }
+    request.transport_hint = static_cast<TransportKind>(hint);
     return request;
 }
 
@@ -143,6 +150,7 @@ std::vector<std::uint8_t> PeerIntroduction::encode() const {
     writer.put_bytes(proof, sizeof(proof));
     writer.put_bytes(signature, sizeof(signature));
     writer.put_u64(pairing_id);
+    writer.put_u8(static_cast<std::uint8_t>(transport_hint));
     return writer.take();
 }
 
@@ -160,7 +168,46 @@ PeerIntroduction PeerIntroduction::decode(const std::vector<std::uint8_t>& paylo
     reader.take_fixed(introduction.proof, sizeof(introduction.proof));
     reader.take_fixed(introduction.signature, sizeof(introduction.signature));
     introduction.pairing_id = reader.take_u64();
+
+    std::uint8_t hint = reader.take_u8();
+    if (hint > static_cast<std::uint8_t>(TransportKind::ServerRelay)) {
+        fail("peer introduction names an unknown transport");
+    }
+    introduction.transport_hint = static_cast<TransportKind>(hint);
     return introduction;
+}
+
+// ---------------------------------------------------------------------------
+// Reflexive address discovery
+// ---------------------------------------------------------------------------
+
+std::size_t encode_reflexive_reply(const Endpoint& observed, std::uint8_t* out,
+                                  std::size_t capacity) {
+    PayloadWriter writer;
+    writer.put_raw(kReflexiveReplyMagic, sizeof(kReflexiveReplyMagic));
+    writer.put_endpoint(observed);
+
+    const std::vector<std::uint8_t>& bytes = writer.bytes();
+    if (bytes.size() > capacity) fail("reflexive reply does not fit in the datagram buffer");
+
+    std::memcpy(out, bytes.data(), bytes.size());
+    return bytes.size();
+}
+
+bool decode_reflexive_reply(const std::uint8_t* data, std::size_t len, Endpoint& out) {
+    if (len < sizeof(kReflexiveReplyMagic)) return false;
+    if (std::memcmp(data, kReflexiveReplyMagic, sizeof(kReflexiveReplyMagic)) != 0) return false;
+
+    try {
+        PayloadReader reader(data + sizeof(kReflexiveReplyMagic),
+                            len - sizeof(kReflexiveReplyMagic));
+        out = reader.take_endpoint();
+        return true;
+    } catch (const Error&) {
+        // A malformed reply is just a probe that did not work; the caller falls
+        // back to its local candidates.
+        return false;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +220,7 @@ std::vector<std::uint8_t> TransferOffer::encode() const {
     writer.put_string(display_name);
     writer.put_bool(encrypt_payload);
     writer.put_u8(static_cast<std::uint8_t>(algorithm));
+    writer.put_bool(digests_present);
     writer.put_u32(chunk_size);
     writer.put_u64(total_bytes);
     writer.put_u32(static_cast<std::uint32_t>(entries.size()));
@@ -200,6 +248,7 @@ TransferOffer TransferOffer::decode(const std::uint8_t* data, std::size_t len) {
     if (algorithm != 1 && algorithm != 2) fail("offer names an unknown cipher");
     offer.algorithm = static_cast<AeadAlgorithm>(algorithm);
 
+    offer.digests_present = reader.take_bool();
     offer.chunk_size = reader.take_u32();
     if (offer.chunk_size == 0 || offer.chunk_size > kMaxFrameLength - kChunkHeaderSize - kAeadTagSize) {
         fail("offer names an unusable chunk size");
