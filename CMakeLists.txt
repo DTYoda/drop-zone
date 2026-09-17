@@ -116,12 +116,15 @@ endif()
 # install` only ever places the client and its manual page on the machine.
 # ---------------------------------------------------------------------------
 
+include(GNUInstallDirs)
+
 if(DZ_BUILD_CLIENT)
-    install(TARGETS drop-zone RUNTIME DESTINATION bin)
+    install(TARGETS drop-zone RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(FILES packaging/man/drop-zone.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 endif()
 
 if(DZ_BUILD_SERVER)
-    install(TARGETS drop-zone-server RUNTIME DESTINATION bin)
+    install(TARGETS drop-zone-server RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 message(STATUS "drop-zone ${PROJECT_VERSION}: build=${CMAKE_BUILD_TYPE} client=${DZ_BUILD_CLIENT} "

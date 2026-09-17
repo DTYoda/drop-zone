@@ -43,6 +43,11 @@ clean:
 distclean:
 	rm -rf $(BUILD_DIR)
 
+## format: clang-format the C++ sources
+format:
+	@find common client server tests -name '*.cpp' -o -name '*.hpp' \
+		| xargs clang-format -i
+
 ## help: list the available targets
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /'

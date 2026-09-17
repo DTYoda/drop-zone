@@ -1,0 +1,138 @@
+.TH DROP-ZONE 1 "September 2026" "drop-zone 1.0.0" "User Commands"
+.SH NAME
+drop-zone \- send files straight to another person's terminal
+.SH SYNOPSIS
+.B drop-zone
+.I COMMAND
+.RI [ OPTION ...]
+.SH DESCRIPTION
+.B drop-zone
+sends files directly between two machines. A receiver runs
+.B accept
+and a sender runs
+.B send .
+The rendezvous server introduces the two peers and then steps out of the way:
+it never sees a password, a filename or a file byte, and it keeps no record of
+either peer.
+.PP
+The transfer uses the best path the two machines can open: a direct TCP
+connection, a hole-punched UDP stream, or, if both of those fail, a relay of
+ciphertext through the server.
+.SH COMMANDS
+.TP
+.B setup
+Choose a username and passwords, and create an identity for this machine.
+Writes
+.I ~/.config/drop-zone/config.toml
+and a sealed
+.I identity.key
+with mode 0600.
+.TP
+.B accept
+Wait for incoming files and save them. Prompts before each transfer unless
+.B \-y
+is given.
+.TP
+.B send
+.I FILE...
+.B \-t
+.I USER
+Send files or directories to
+.IR USER .
+.TP
+.B whoami
+Print this machine's username and identity fingerprint.
+.TP
+.B status
+Print the configuration and what this build can do, including which AEAD the
+CPU will use.
+.SH OPTIONS
+.SS Send options
+.TP
+.BR \-t ", " \-\-target = USER
+Username to send to.
+.TP
+.BR \-p ", " \-\-password = PASSWORD
+.IR USER 's
+public password. Omit it and drop-zone will ask, which keeps it out of the
+shell history.
+.SS Accept options
+.TP
+.BR \-o ", " \-\-output = DIR
+Directory to save files in. Default: the directory the command was run from.
+.TP
+.BR \-y ", " \-\-yes
+Accept every transfer without asking.
+.TP
+.B \-\-once
+Accept one transfer, then exit.
+.SS Options for either mode
+.TP
+.B \-\-no\-encrypt
+Send file contents unencrypted. Slightly faster on a network you trust;
+refused when the transfer would have to go through the server.
+.TP
+.B \-\-encrypt
+Encrypt file contents (the default).
+.TP
+.B \-\-verify
+Hash every file and compare. Costs an extra read pass on both sides. Off by
+default: in encrypted mode each chunk's authentication tag already proves its
+bytes.
+.TP
+.BR \-\-server = HOST [: PORT ]
+Use a different rendezvous server for this run.
+.TP
+.BR \-\-force\-transport = T
+Insist on one path:
+.BR tcp ,
+.B udp
+or
+.BR relay .
+Without this, drop-zone tries all three in that order.
+.TP
+.BR \-\-config\-dir = DIR
+Use a different configuration directory.
+.TP
+.BR \-q ", " \-\-quiet
+Only report problems.
+.TP
+.BR \-\-log\-level = LEVEL
+.BR error ,
+.BR warn ,
+.B info
+or
+.BR debug .
+.TP
+.BR \-h ", " \-\-help
+Print a help message.
+.TP
+.BR \-V ", " \-\-version
+Print the version.
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/drop-zone/config.toml
+Username, server address, preferences. No secrets. Mode 0600.
+.TP
+.I $XDG_CONFIG_HOME/drop-zone/identity.key
+Ed25519 identity, sealed under the private password. Mode 0600.
+.TP
+.I $XDG_CONFIG_HOME/drop-zone/known_peers
+Trust-on-first-use pins, one username per line.
+.PP
+.B DROP_ZONE_HOME
+overrides the configuration directory. Used by the end-to-end test to run two
+clients on one machine.
+.SH ENVIRONMENT
+.TP
+.B DROP_ZONE_HOME
+Configuration directory.
+.TP
+.B DROP_ZONE_ALLOW_LOOPBACK
+If set, include 127.0.0.1 in the candidate list. Required for a loopback test;
+useless in real use, because a peer cannot reach our loopback.
+.SH SEE ALSO
+Full protocol, security and performance notes live in the source tree under
+.IR docs/ .
+.SH AUTHORS
+drop-zone

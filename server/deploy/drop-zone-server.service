@@ -1,0 +1,53 @@
+# drop-zone-server — rendezvous daemon.
+#
+# Storage-free by construction: there is no RuntimeDirectory of state, no
+# database, and the process is forbidden from writing anywhere it does not
+# need. A username lives only while its owner is connected.
+#
+# Install the binary to /usr/local/bin (or /usr/bin) and:
+#   systemctl enable --now drop-zone-server
+
+[Unit]
+Description=drop-zone rendezvous server
+Documentation=https://github.com/DTYoda/drop-zone
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/drop-zone-server --bind :: --port 47654
+Restart=on-failure
+RestartSec=2
+
+# The daemon has no disk state. Make that true of the sandbox as well.
+DynamicUser=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictNamespaces=yes
+
+# Core dumps would contain the in-memory session table (live peer addresses
+# and public keys). The process also sets RLIMIT_CORE 0 itself; this is the
+# systemd-side copy of the same promise.
+LimitCORE=0
+
+# Journald adds timestamps; the daemon still logs a level so grep works.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drop-zone-server
+
+[Install]
+WantedBy=multi-user.target
