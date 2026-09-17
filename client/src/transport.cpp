@@ -196,6 +196,7 @@ ChannelPtr establish_channel(LocalSockets& sockets, const TransportRequest& requ
                      request.forced == TransportKind::ServerRelay;
 
     if (try_tcp) {
+        log::info("trying TCP");
         if (ChannelPtr channel = try_direct_tcp(sockets, request)) return channel;
         if (request.forced == TransportKind::DirectTcp) {
             fail_user("no direct TCP connection could be made and --force-transport=tcp was given");
@@ -203,6 +204,7 @@ ChannelPtr establish_channel(LocalSockets& sockets, const TransportRequest& requ
     }
 
     if (try_udp) {
+        log::info("trying UDP");
         if (ChannelPtr channel = try_hole_punch_udp(sockets, request)) return channel;
         if (request.forced == TransportKind::HolePunchUdp) {
             fail_user("no UDP path could be opened and --force-transport=udp was given");
@@ -210,7 +212,10 @@ ChannelPtr establish_channel(LocalSockets& sockets, const TransportRequest& requ
     }
 
     if (try_relay) {
-        log::info("no direct path to the peer; falling back to the rendezvous server");
+        if (try_tcp || try_udp) {
+            log::info("no direct path to the peer; falling back to the rendezvous server");
+        }
+        log::info("trying relay");
         return open_server_relay(request);
     }
 

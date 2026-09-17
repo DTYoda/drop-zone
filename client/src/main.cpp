@@ -278,7 +278,7 @@ int command_send(const CommandLine& args) {
     request.pairing_id = introduction.pairing_id;
 
     ChannelPtr channel = establish_channel(sockets, request);
-    if (!args.quiet) std::fprintf(stderr, "connected: %s\n", channel->describe().c_str());
+    log::info(std::string("connected: ") + channel->describe());
 
     SendOptions options;
     options.encrypt = args.encrypt_set ? args.encrypt : config.encrypt_by_default;
@@ -367,7 +367,7 @@ int command_accept(const CommandLine& args) {
         request.pairing_id = introduction.pairing_id;
 
         ChannelPtr channel = establish_channel(sockets, request);
-        if (!args.quiet) std::fprintf(stderr, "connected: %s\n", channel->describe().c_str());
+        log::info(std::string("connected: ") + channel->describe());
 
         ReceiveOptions options;
         options.output_directory = output_directory;
@@ -390,9 +390,7 @@ int command_accept(const CommandLine& args) {
         // The relay tier tunnels through the control connection, so once a transfer
         // has used it that connection is no longer usable for anything else.
         if (channel->kind() == TransportKind::ServerRelay) {
-            if (!args.quiet) {
-                std::fprintf(stderr, "that transfer used the relay, so reconnecting\n");
-            }
+            log::info("that transfer used the relay, so reconnecting");
             break;
         }
     }
@@ -410,6 +408,14 @@ int run(int argc, char* argv[]) {
         log::set_level(level);
     } else if (args.quiet) {
         log::set_level(log::Level::Error);
+    } else if (args.verbose) {
+        // Debug includes the per-candidate TCP/UDP probes as well as the
+        // high-level "trying TCP" lines at Info.
+        log::set_level(log::Level::Debug);
+    } else {
+        // Warn still reports password failures, skipped files, and errors.
+        // Transport-ladder chatter stays off until -v or --log-level.
+        log::set_level(log::Level::Warn);
     }
 
     // A peer disappearing mid-transfer should surface as an error from write(),

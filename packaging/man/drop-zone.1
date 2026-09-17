@@ -94,6 +94,11 @@ Without this, drop-zone tries all three in that order.
 .BR \-\-config\-dir = DIR
 Use a different configuration directory.
 .TP
+.BR \-v ", " \-\-verbose
+Show transport attempts (TCP, UDP, relay) and other connection details.
+Without this, drop-zone still reports errors, a wrong public password,
+and accepting or rejecting files, but hides the transport ladder.
+.TP
 .BR \-q ", " \-\-quiet
 Only report problems.
 .TP

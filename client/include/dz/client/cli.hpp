@@ -70,6 +70,9 @@ struct CommandLine {
 
     std::string log_level;
     bool quiet = false;
+    /// Show transport attempts and other connection details. Off by default so a
+    /// normal run only reports problems, password failures, and accept/reject.
+    bool verbose = false;
 };
 
 /// Print the help message and exit. A non-null `error` sends it to stderr with

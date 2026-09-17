@@ -48,6 +48,7 @@ void print_help(const char* error) {
                  "      --no-relay              refuse to forward data; require a direct path.\n"
                  "      --connections-per-min=N per-address connection limit (default 60).\n"
                  "      --requests-per-min=N    per-address introduction limit (default 20).\n"
+                 "  -v, --verbose               show each connection, introduction and relay.\n"
                  "  -l, --log-level=LEVEL       error, warn, info or debug (default info).\n"
                  "\n"
                  "The server keeps no database and writes nothing to disk. A username is held\n"
@@ -93,6 +94,7 @@ int main(int argc, char* argv[]) {
         {"port", required_argument, nullptr, 'p'},
         {"shards", required_argument, nullptr, 's'},
         {"log-level", required_argument, nullptr, 'l'},
+        {"verbose", no_argument, nullptr, 'v'},
         {"idle-timeout", required_argument, nullptr, kIdleTimeout},
         {"pairing-timeout", required_argument, nullptr, kPairingTimeout},
         {"no-relay", no_argument, nullptr, kNoRelay},
@@ -102,7 +104,7 @@ int main(int argc, char* argv[]) {
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "hVb:p:s:l:", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hVb:p:s:l:v", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
                 print_help(nullptr);
@@ -125,6 +127,9 @@ int main(int argc, char* argv[]) {
                 dz::log::set_level(level);
                 break;
             }
+            case 'v':
+                dz::log::set_level(dz::log::Level::Debug);
+                break;
             case kIdleTimeout:
                 options.idle_timeout_seconds =
                     static_cast<std::uint32_t>(parse_number(optarg, "--idle-timeout"));

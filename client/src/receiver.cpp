@@ -356,11 +356,14 @@ ReceiveResult receive_transfer(Channel& channel, const SessionKeys& keys,
     result.seconds = progress.elapsed_seconds();
     result.written_paths = std::move(paths);
 
-    std::string suffix = std::string("over ") + transport_kind_name(channel.kind());
+    std::string suffix;
+    if (log::enabled(log::Level::Info)) {
+        suffix = std::string("over ") + transport_kind_name(channel.kind());
+    }
     if (offer.encrypt_payload) {
-        suffix += std::string(", ") + aead_algorithm_name(offer.algorithm);
+        suffix += (suffix.empty() ? "" : ", ") + std::string(aead_algorithm_name(offer.algorithm));
     } else {
-        suffix += ", not encrypted";
+        suffix += (suffix.empty() ? "" : ", ") + std::string("not encrypted");
     }
     progress.finish(suffix);
 
