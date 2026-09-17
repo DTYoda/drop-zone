@@ -76,7 +76,6 @@ setup_client() {
     local home="$1" username="$2" private="$3" public="$4"
     DROP_ZONE_HOME="$home" "$CLIENT" setup --server="127.0.0.1:$PORT" >/dev/null 2>&1 <<EOF
 $username
-
 $private
 $private
 $public

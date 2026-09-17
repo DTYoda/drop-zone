@@ -33,7 +33,10 @@ is given.
 .B accept
 Wait for incoming files and save them. Prompts before each transfer unless
 .B \-y
-is given.
+is given. Files land in the current directory unless
+.B \-o
+is given or a default was set with
+.BR set-output .
 .TP
 .B send
 .I FILE...
@@ -48,6 +51,18 @@ Print this machine's username and identity fingerprint.
 .B status
 Print the configuration and what this build can do, including which AEAD the
 CPU will use.
+.TP
+.B set-output
+.I DIR
+Permanently change where received files are saved.
+.I DIR
+of
+.B .
+or
+.B ./
+means the directory
+.B accept
+is run from.
 .TP
 .B set-server
 .I HOST[:PORT]
@@ -66,7 +81,8 @@ shell history.
 .SS Accept options
 .TP
 .BR \-o ", " \-\-output = DIR
-Directory to save files in. Default: the directory the command was run from.
+Directory to save files in for this run only. Default: the configured
+output directory, or the directory the command was run from.
 .TP
 .BR \-y ", " \-\-yes
 Accept every transfer without asking.

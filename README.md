@@ -38,11 +38,11 @@ That taps [DTYoda/homebrew-tap](https://github.com/DTYoda/homebrew-tap) and trus
 
 ```sh
 drop-zone setup
-drop-zone accept -o ~/Downloads          # receiver
+drop-zone accept                         # receiver; files land in ./
 drop-zone send report.pdf -t alice       # sender
 ```
 
-`setup` asks for a username, a private password (seals the identity keystore) and a public password (what senders type to prove they are allowed to reach you). Neither password is stored in the clear; the public password is not stored at all. The official public rendezvous server (`129.153.161.241`) is used by default; change it later with `drop-zone set-server HOST[:PORT]`.
+`setup` asks for a username, a private password (seals the identity keystore) and a public password (what senders type to prove they are allowed to reach you). Neither password is stored in the clear; the public password is not stored at all. The official public rendezvous server (`129.153.161.241`) is used by default; change it later with `drop-zone set-server HOST[:PORT]`. Received files land in the current directory; change the default with `drop-zone set-output DIR`, or pass `-o DIR` on a single `accept`.
 
 ## Commands
 
@@ -53,6 +53,7 @@ drop-zone send report.pdf -t alice       # sender
 | `send FILE... -t USER` | Send files or directories |
 | `whoami` | Print this machine's username and identity fingerprint |
 | `status` | Print the configuration and which cipher this CPU will use |
+| `set-output DIR` | Permanently change where received files are saved |
 | `set-server HOST[:PORT]` | Permanently change the rendezvous server |
 
 Useful flags, also listed in `drop-zone --help`:

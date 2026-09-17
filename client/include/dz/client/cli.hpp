@@ -25,6 +25,7 @@ enum class Command {
     WhoAmI,     ///< Print this installation's username and fingerprint.
     Status,     ///< Print the configuration and what this build can do.
     SetServer,  ///< Permanently change the rendezvous server in the config.
+    SetOutput,  ///< Permanently change the default directory for received files.
     Help,
     Version,
 };

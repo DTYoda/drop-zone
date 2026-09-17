@@ -26,7 +26,8 @@ struct Config {
     std::uint16_t server_port = kDefaultServerPort;
 
     /// Where received files go when `accept` is given no -o.
-    /// Empty means the directory the program was run from.
+    /// Empty (the setup default) means the directory the program was run from.
+    /// Change it with `drop-zone set-output DIR`.
     std::string default_output_directory;
 
     /// Encrypt the file payload by default. `--no-encrypt` overrides per run.

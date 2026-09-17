@@ -58,5 +58,6 @@ class DropZone < Formula
     assert_match "drop-zone setup", help
     assert_match "send FILE", help
     assert_match "set-server", help
+    assert_match "set-output", help
   end
 end
