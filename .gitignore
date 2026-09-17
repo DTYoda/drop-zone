@@ -1,4 +1,15 @@
+# Build trees
+build/
+build-*/
+cmake-build-*/
+
+# Compiled objects and binaries from ad-hoc builds
 *.o
+*.a
 drop-zone
+drop-zone-server
+
+# Local secrets and test scratch space
 .env
 .env.local
+tests/scratch/
