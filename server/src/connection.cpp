@@ -49,6 +49,10 @@ ConnectionPtr Connection::relay_peer() const {
     return relay_peer_.lock();
 }
 
+bool Connection::input_at_cap() const {
+    return (input_.size() - input_consumed_) >= kMaxInputBuffer;
+}
+
 Connection::~Connection() {
     // Both buffers can hold a peer's public keys and candidate addresses, and
     // the relay buffers hold their ciphertext. Wiping on the way out means a
@@ -64,19 +68,19 @@ Connection::~Connection() {
 
 bool Connection::read_available() {
     for (;;) {
-        // Reclaim the front of the buffer once enough has been consumed that
-        // the memmove is worth it, rather than on every frame.
-        if (input_consumed_ > 0 && input_consumed_ >= input_.size() / 2) {
+        // Compact before the cap check so consumed bytes cannot make a half-read
+        // buffer look full. Using size() here, rather than unconsumed bytes, is
+        // what stalled the relay: a 2 MiB vector whose front was already parsed
+        // refused further recv(), edge-triggered epoll did not fire again, and
+        // the transfer sat idle until the 300 s timeout RSTed it.
+        if (input_consumed_ > 0 &&
+            (input_consumed_ >= 64 * 1024 || input_consumed_ >= input_.size() / 2)) {
             input_.erase(input_.begin(),
                          input_.begin() + static_cast<std::ptrdiff_t>(input_consumed_));
             input_consumed_ = 0;
         }
 
-        if (input_.size() >= kMaxInputBuffer) {
-            // The peer is ahead of what the protocol allows in flight. Stop
-            // reading; the frame handler will either consume it or close.
-            return true;
-        }
+        if (input_.size() - input_consumed_ >= kMaxInputBuffer) return true;
 
         std::size_t previous = input_.size();
         input_.resize(previous + kReadBatch);

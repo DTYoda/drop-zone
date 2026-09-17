@@ -144,6 +144,12 @@ public:
     /// True once the peer has closed its half and the input buffer is drained.
     bool peer_closed() const { return peer_closed_; }
 
+    /// Unconsumed input has reached the cap, so the caller must process frames
+    /// before reading again. Edge-triggered polling will not wake us for data
+    /// already in the kernel, so the shard loop has to come back of its own
+    /// accord rather than waiting for another Readable event.
+    bool input_at_cap() const;
+
 private:
     Fd fd_;
     std::uint64_t id_;

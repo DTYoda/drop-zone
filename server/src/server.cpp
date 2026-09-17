@@ -345,15 +345,15 @@ void Server::drain_wake_queue(Shard& shard) {
         if (found == shard.connections.end()) continue;
 
         ConnectionPtr connection = found->second;
-        if (!connection->flush_output()) {
-            close_connection(shard, connection);
-            continue;
-        }
-        if (connection->close_requested() && !connection->wants_write()) {
-            close_connection(shard, connection);
-            continue;
-        }
-        update_interest(shard, connection);
+
+        // A wake means "re-examine", not just "flush". Relays pause a source
+        // when its peer's output is full; unpausing re-arms Readable on an
+        // edge-triggered poller, which will not report data that arrived while
+        // the source was paused. Draining here is what makes the resume take.
+        ReadyEvent resume;
+        resume.readable = !connection->read_paused();
+        resume.writable = true;
+        service_connection(shard, connection, resume);
     }
 }
 
@@ -380,30 +380,41 @@ void Server::service_connection(Shard& shard, const ConnectionPtr& connection,
         }
     }
 
-    if (event.readable && !connection->read_paused()) {
-        bool still_open = connection->read_available();
+    if (!connection->read_paused() && (event.readable || connection->input_at_cap())) {
+        for (;;) {
+            bool still_open = connection->read_available();
 
-        // Frames already buffered are handled even when the peer has closed:
-        // a client that sends Bye and shuts down immediately still deserves to
-        // have its last frame processed.
-        Frame frame;
-        try {
-            while (connection->next_frame(frame)) {
-                handle_frame(shard, connection, frame);
-                if (connection->close_requested()) break;
+            // Frames already buffered are handled even when the peer has closed:
+            // a client that sends Bye and shuts down immediately still deserves to
+            // have its last frame processed.
+            bool processed = false;
+            Frame frame;
+            try {
+                while (connection->next_frame(frame)) {
+                    processed = true;
+                    handle_frame(shard, connection, frame);
+                    if (connection->close_requested() || connection->read_paused()) break;
+                }
+            } catch (const Error& error) {
+                log::debug(connection->label() + " protocol error: " + error.what());
+                connection->request_close(error.what());
             }
-        } catch (const Error& error) {
-            log::debug(connection->label() + " protocol error: " + error.what());
-            connection->request_close(error.what());
-        }
 
-        if (!still_open) {
-            if (!connection->flush_output()) {
+            if (!still_open) {
+                if (!connection->flush_output()) {
+                    close_connection(shard, connection);
+                    return;
+                }
                 close_connection(shard, connection);
                 return;
             }
-            close_connection(shard, connection);
-            return;
+
+            // read_available stops at the input cap as well as at EAGAIN. The cap
+            // is not a real stall: processing the frames we just took should have
+            // freed the buffer, and looping reads the rest of the kernel queue
+            // that edge-triggered epoll will not report again.
+            if (connection->close_requested() || connection->read_paused()) break;
+            if (!processed || !connection->input_at_cap()) break;
         }
     }
 
@@ -787,14 +798,27 @@ void Server::handle_relay_open(const ConnectionPtr& connection, const Frame& fra
 }
 
 void Server::handle_relay_data(const ConnectionPtr& connection, const Frame& frame) {
-    if (connection->state != ConnectionState::Relaying) {
-        reject_and_close(connection, "this connection is not relaying");
-        return;
-    }
-
     ConnectionPtr peer = connection->relay_peer();
     if (peer == nullptr) {
-        connection->request_close("the other peer disconnected");
+        // Relaying is published from whichever shard handled the second
+        // RelayOpen. If this RelayData won the race, recover the peer from the
+        // pairing rather than RSTing a transfer that has already opened.
+        Pairing pairing;
+        if (connection->pairing_id != 0 &&
+            sessions_.find_pairing(connection->pairing_id, pairing) && pairing.relay_active) {
+            ConnectionPtr sender = pairing.sender.lock();
+            ConnectionPtr receiver = pairing.receiver.lock();
+            if (sender != nullptr && receiver != nullptr) {
+                sender->attach_relay_peer(receiver);
+                receiver->attach_relay_peer(sender);
+                sender->state = ConnectionState::Relaying;
+                receiver->state = ConnectionState::Relaying;
+                peer = (sender == connection) ? receiver : sender;
+            }
+        }
+    }
+    if (peer == nullptr) {
+        reject_and_close(connection, "this connection is not relaying");
         return;
     }
 
