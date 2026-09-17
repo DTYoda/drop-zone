@@ -47,6 +47,16 @@ enum class ClaimResult {
     InvalidUsername,
 };
 
+/// Outcome of creating or joining an ephemeral group.
+enum class GroupJoinResult {
+    Created,
+    Joined,
+    WrongPassword,
+    InvalidName,
+    Full,
+    AlreadyMember,
+};
+
 class SessionTable {
 public:
     /// Claim `username` for `connection`. One map guarded by one mutex: a
@@ -83,10 +93,39 @@ public:
     std::size_t claimed_usernames() const;
     std::size_t active_pairings() const;
 
+    /// True when `name` currently has at least one live member.
+    bool group_exists(const std::string& name) const;
+
+    /// Live member count after pruning disconnected sockets.
+    std::size_t group_member_count(const std::string& name) const;
+
+    /// Create the group if empty, otherwise compare `verifier` and add
+    /// `connection`. Membership lasts only as long as the socket.
+    GroupJoinResult join_group(const std::string& name, const std::uint8_t verifier[kSha256Size],
+                               const ConnectionPtr& connection);
+
+    /// Drop `connection` from `name`. Destroys the group when the last member
+    /// leaves. Idempotent.
+    void leave_group(const std::string& name, const Connection* connection);
+
+    /// Currently accepting (idle) members, excluding `skip_username`.
+    std::vector<ConnectionPtr> idle_group_members(const std::string& name,
+                                                  const std::string& skip_username) const;
+
 private:
+    struct Group {
+        std::uint8_t verifier[kSha256Size]{};
+        std::vector<std::weak_ptr<Connection>> members;
+    };
+
+    /// Drop expired weak_ptrs. Caller holds mutex_. Returns true if the group
+    /// still has anyone in it.
+    bool prune_group_locked(Group& group) const;
+
     mutable std::mutex mutex_;
     std::unordered_map<std::string, std::weak_ptr<Connection>> claims_;
     std::unordered_map<std::uint64_t, Pairing> pairings_;
+    mutable std::unordered_map<std::string, Group> groups_;
     std::uint64_t next_pairing_counter_ = 1;
     std::uint64_t pairing_id_salt_ = 0;
     bool salt_ready_ = false;

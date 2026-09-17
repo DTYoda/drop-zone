@@ -45,6 +45,10 @@ constexpr std::uint32_t kDefaultChunkSize = 1u << 20;
 /// make the server's session table hold megabyte-long keys.
 constexpr std::size_t kMaxUsernameLength = 64;
 
+/// Most members an ephemeral group may hold at once. Bounded so a roster
+/// cannot become a way to pin the server's memory or the sender's fan-out.
+constexpr std::size_t kMaxGroupMembers = 32;
+
 /// Longest relative path inside a manifest.
 constexpr std::size_t kMaxPathLength = 1024;
 
@@ -70,6 +74,9 @@ constexpr const char* kInfoOfferKey = "drop-zone/v1 sealed offer";
 constexpr const char* kInfoTransportHandshake = "drop-zone/v1 transport handshake";
 constexpr const char* kMacContextSenderProof = "drop-zone/v1 sender proof";
 constexpr const char* kMacContextReceiverProof = "drop-zone/v1 receiver proof";
+constexpr const char* kMacContextGroupSenderProof = "drop-zone/v1 group sender proof";
+constexpr const char* kMacContextGroupReceiverProof = "drop-zone/v1 group receiver proof";
+constexpr const char* kMacContextGroupVerifier = "drop-zone/v1 group verifier";
 constexpr const char* kSignContextTranscript = "drop-zone/v1 transcript signature";
 constexpr const char* kKeystoreAad = "drop-zone/v1 identity keystore";
 
@@ -85,6 +92,11 @@ std::string public_password_salt(std::string_view receiver_username);
 
 /// Stretch a public password into the MAC key both peers use for their proofs.
 Key derive_public_password_key(std::string_view password, std::string_view receiver_username);
+
+/// HMAC of the stretched group password, which is all the server stores for a
+/// group. The password itself never leaves the clients.
+void derive_group_verifier(const Key& password_key, std::string_view group_name,
+                           std::uint8_t out[kSha256Size]);
 
 // ---------------------------------------------------------------------------
 // Which transport carried the data
@@ -186,6 +198,10 @@ struct SendRequest {
     /// The sender's --force-transport, passed through to the receiver so both
     /// peers run the same ladder. A test knob, not a security control.
     TransportKind transport_hint = TransportKind::None;
+    /// Empty for a personal send. When set, proofs use the group password and
+    /// the group MAC context. Encoded as an optional trailing field so a 1:1
+    /// SendRequest on the wire is unchanged.
+    std::string group_name;
 
     std::vector<std::uint8_t> encode() const;
     static SendRequest decode(const std::vector<std::uint8_t>& payload);
@@ -211,9 +227,72 @@ struct PeerIntroduction {
     /// Not covered by the password proofs because forcing a tier cannot weaken
     /// the session: every tier carries the same end-to-end encrypted stream.
     TransportKind transport_hint = TransportKind::None;
+    /// Empty for a personal introduction. Copied from SendRequest when this
+    /// Incoming is a group send, so the receiver knows which password key to use.
+    std::string group_name;
 
     std::vector<std::uint8_t> encode() const;
     static PeerIntroduction decode(const std::vector<std::uint8_t>& payload);
+};
+
+enum class GroupJoinOutcome : std::uint8_t {
+    Created = 1,
+    Joined = 2,
+    WrongPassword = 3,
+    InvalidName = 4,
+    Full = 5,
+    AlreadyMember = 6,
+};
+
+/// Receiver asking whether `name` currently has any members.
+struct GroupQuery {
+    std::string name;
+
+    std::vector<std::uint8_t> encode() const;
+    static GroupQuery decode(const std::vector<std::uint8_t>& payload);
+};
+
+struct GroupStatus {
+    bool exists = false;
+    std::uint32_t member_count = 0;
+
+    std::vector<std::uint8_t> encode() const;
+    static GroupStatus decode(const std::vector<std::uint8_t>& payload);
+};
+
+/// Receiver creating or joining a group. `verifier` is HMAC(password_key,
+/// group-verifier context + name); the server never sees the password.
+struct GroupJoin {
+    std::string name;
+    std::uint8_t verifier[kSha256Size]{};
+
+    std::vector<std::uint8_t> encode() const;
+    static GroupJoin decode(const std::vector<std::uint8_t>& payload);
+};
+
+struct GroupResult {
+    GroupJoinOutcome outcome = GroupJoinOutcome::Joined;
+    std::string message;
+    std::uint32_t member_count = 0;
+
+    std::vector<std::uint8_t> encode() const;
+    static GroupResult decode(const std::vector<std::uint8_t>& payload);
+};
+
+struct GroupSendRequest {
+    std::string name;
+
+    std::vector<std::uint8_t> encode() const;
+    static GroupSendRequest decode(const std::vector<std::uint8_t>& payload);
+};
+
+/// Idle members of a group, which is the current membership: anyone not
+/// currently accepting is not in the group.
+struct GroupRoster {
+    std::vector<std::string> usernames;
+
+    std::vector<std::uint8_t> encode() const;
+    static GroupRoster decode(const std::vector<std::uint8_t>& payload);
 };
 
 // ---------------------------------------------------------------------------

@@ -83,6 +83,13 @@ that the same password under the same username always yields the same key.
 Two captured proofs for the same user can be recognised as such. They cannot
 be reversed any faster for it.
 
+Ephemeral groups reuse the same stretch, with the **group name** as salt and a
+separate MAC context for join verifiers and group-send proofs. The server
+stores only the join verifier while the group has members; when the last
+member disconnects, that verifier is forgotten and the next first joiner may
+set a new password. A captured group SendRequest is still subject to the same
+offline dictionary attack as a personal one.
+
 Mitigations that **are** in place:
 
 - The server rate-limits introduction attempts per salted-hash of the source

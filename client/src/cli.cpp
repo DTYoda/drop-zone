@@ -22,6 +22,7 @@ enum LongOnly {
     kForceTransport,
     kConfigDir,
     kLogLevel,
+    kGroup,
 };
 
 Command parse_command(const char* text) {
@@ -89,8 +90,11 @@ void print_help(const char* error) {
         "\n"
         "Send options:\n"
         "  -t, --target=USER        username to send to.\n"
-        "  -p, --password=PASSWORD  USER's public password. Omit it and drop-zone will\n"
-        "                           ask, which keeps it out of your shell history.\n"
+        "      --group=NAME         send to everybody currently accepting in NAME.\n"
+        "                           Mutually exclusive with --target.\n"
+        "  -p, --password=PASSWORD  USER's (or the group's) public password. Omit it and\n"
+        "                           drop-zone will ask, which keeps it out of your shell\n"
+        "                           history.\n"
         "\n"
         "Accept options:\n"
         "  -o, --output=DIR         save files here for this run only (default: the\n"
@@ -99,6 +103,8 @@ void print_help(const char* error) {
         "                           chosen at setup).\n"
         "  -y, --yes                accept every transfer without asking.\n"
         "      --once               accept one transfer, then exit.\n"
+        "      --group=NAME         also join ephemeral group NAME. The first joiner's\n"
+        "                           public password becomes the group password.\n"
         "\n"
         "Options for either mode:\n"
         "      --no-encrypt         send file contents unencrypted. Slightly faster on a\n"
@@ -126,7 +132,9 @@ void print_help(const char* error) {
         "  drop-zone setup\n"
         "  drop-zone accept\n"
         "  drop-zone accept -o ~/Downloads\n"
+        "  drop-zone accept --group=friends\n"
         "  drop-zone send report.pdf -t alice\n"
+        "  drop-zone send report.pdf --group=friends\n"
         "  drop-zone send ./photos -t bob -p hunter2\n"
         "  drop-zone set-output ~/Downloads\n"
         "  drop-zone set-public-password\n"
@@ -177,6 +185,7 @@ CommandLine parse_command_line(int argc, char* argv[]) {
         {"force-transport", required_argument, nullptr, kForceTransport},
         {"config-dir", required_argument, nullptr, kConfigDir},
         {"log-level", required_argument, nullptr, kLogLevel},
+        {"group", required_argument, nullptr, kGroup},
         {nullptr, 0, nullptr, 0},
     };
 
@@ -244,6 +253,9 @@ CommandLine parse_command_line(int argc, char* argv[]) {
             case kLogLevel:
                 parsed.log_level = optarg;
                 break;
+            case kGroup:
+                parsed.group = optarg;
+                break;
             default:
                 print_help("unrecognised option");
                 break;
@@ -258,15 +270,25 @@ CommandLine parse_command_line(int argc, char* argv[]) {
     switch (parsed.command) {
         case Command::Send:
             if (parsed.inputs.empty()) print_help("say which file or directory to send");
-            if (parsed.target.empty()) print_help("say who to send it to with --target");
-            if (!is_valid_username(parsed.target)) {
+            if (parsed.target.empty() == parsed.group.empty()) {
+                print_help("say who to send to with --target or --group (not both)");
+            }
+            if (!parsed.target.empty() && !is_valid_username(parsed.target)) {
                 print_help("a username may only contain lowercase letters, digits, '-', '_' "
+                           "and '.'");
+            }
+            if (!parsed.group.empty() && !is_valid_username(parsed.group)) {
+                print_help("a group name may only contain lowercase letters, digits, '-', '_' "
                            "and '.'");
             }
             break;
 
         case Command::Accept:
             if (!parsed.inputs.empty()) print_help("`accept` takes no file arguments");
+            if (!parsed.group.empty() && !is_valid_username(parsed.group)) {
+                print_help("a group name may only contain lowercase letters, digits, '-', '_' "
+                           "and '.'");
+            }
             break;
 
         case Command::SetServer:

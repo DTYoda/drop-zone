@@ -49,9 +49,40 @@ server.
 | RelayClose | 10 | both ways | Orderly end of a relayed stream |
 | KeepAlive | 11 | client → server | Holds the claim and the NAT mapping. Default idle timeout is 300 s; clients send every 25 s. |
 | Bye | 12 | client → server | Orderly hang-up |
+| GroupQuery | 13 | client → server | Does this ephemeral group currently exist? |
+| GroupStatus | 14 | server → client | Exists, and how many members |
+| GroupJoin | 15 | receiver → server | Create or join with a password verifier |
+| GroupResult | 16 | server → client | Created, joined, or why not |
+| GroupSendRequest | 17 | sender → server | Ask for currently idle members |
+| GroupRoster | 18 | server → sender | Usernames of members currently accepting |
 
 A receiver may send a second ClientHello on the same connection to refresh its
-ports and ephemeral key between transfers without dropping the username claim.
+ports and ephemeral key between transfers without dropping the username claim
+or group membership.
+
+## Groups
+
+Groups are ephemeral and storage-free, like username claims. A receiver that
+runs `accept --group=NAME` still claims its personal username, then creates or
+joins `NAME`. Membership lasts only while that control connection is open: the
+last member to disconnect destroys the group and its verifier.
+
+The first joiner's public password becomes the group password. Both peers stretch
+it with scrypt using the **group name** as salt (not a username), then the
+joiner sends `verifier = HMAC(password_key, "drop-zone/v1 group verifier/" +
+name)`. The server stores only that verifier. Later joiners must present the
+same verifier; the server never sees the password.
+
+`send --group=NAME` asks for a `GroupRoster` of members currently in
+`ReceiverIdle`, then runs one ordinary 1:1 introduction and transfer per
+member in parallel. Each `SendRequest` carries an optional trailing
+`group_name` so the receiver knows to check the group password proof
+(`"drop-zone/v1 group sender proof"` / `"drop-zone/v1 group receiver proof"`,
+including the group name) rather than the personal one. Personal
+`send -t USER` keeps working on the same accept session.
+
+Membership is capped at 32. An empty roster is a user-visible failure: nobody
+in the group is accepting right now.
 
 ## Handshake
 

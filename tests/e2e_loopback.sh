@@ -271,6 +271,124 @@ else
 fi
 
 # --------------------------------------------------------------------------
+# Groups
+# --------------------------------------------------------------------------
+
+printf '\nGroups\n'
+
+ALICE_PUBLIC="alice-public-password-long"
+CAROL_PRIVATE="carol-private-password"
+CAROL_PUBLIC="carol-public-password-long"
+mkdir -p "$WORK/carol"
+setup_client "$WORK/carol" carol "$CAROL_PRIVATE" "$CAROL_PUBLIC"
+
+# Empty group: nobody accepting under that name.
+DROP_ZONE_HOME="$WORK/carol" "$CLIENT" send "$WORK/source/tree/small.bin" --group=friends \
+    --force-transport=tcp > "$WORK/sender-empty-group.log" 2>&1 <<EOF
+$CAROL_PRIVATE
+$ALICE_PUBLIC
+EOF
+if [[ $? -ne 0 ]] && grep -qi "nobody\|not accepting\|empty\|right now" "$WORK/sender-empty-group.log"; then
+    ok "sending to an empty group is refused"
+else
+    bad "sending to an empty group did not fail as expected"
+    tail -8 "$WORK/sender-empty-group.log" | sed 's/^/    /'
+fi
+
+alice_out="$WORK/out-group-alice"
+bob_out="$WORK/out-group-bob"
+rm -rf "$alice_out" "$bob_out"
+mkdir -p "$alice_out" "$bob_out"
+
+# Alice creates the group (password = her public password). Bob joins with it.
+DROP_ZONE_HOME="$WORK/alice" "$CLIENT" accept --once -y -o "$alice_out" --group=friends \
+    --force-transport=tcp > "$WORK/receiver-group-alice.log" 2>&1 <<EOF &
+$ALICE_PRIVATE
+EOF
+alice_pid=$!
+sleep 1.5
+
+DROP_ZONE_HOME="$WORK/bob" "$CLIENT" accept --once -y -o "$bob_out" --group=friends \
+    --force-transport=tcp > "$WORK/receiver-group-bob.log" 2>&1 <<EOF &
+$BOB_PRIVATE
+$ALICE_PUBLIC
+EOF
+bob_pid=$!
+sleep 1.5
+
+DROP_ZONE_HOME="$WORK/carol" "$CLIENT" send "$WORK/source/tree/small.bin" --group=friends \
+    --force-transport=tcp > "$WORK/sender-group.log" 2>&1 <<EOF
+$CAROL_PRIVATE
+$ALICE_PUBLIC
+EOF
+sender_status=$?
+
+wait "$alice_pid"
+alice_status=$?
+wait "$bob_pid"
+bob_status=$?
+
+if [[ "$sender_status" -eq 0 && "$alice_status" -eq 0 && "$bob_status" -eq 0 ]] && \
+   [[ -e "$alice_out/small.bin" && -e "$bob_out/small.bin" ]] && \
+   cmp -s "$WORK/source/tree/small.bin" "$alice_out/small.bin" && \
+   cmp -s "$WORK/source/tree/small.bin" "$bob_out/small.bin"; then
+    ok "group send reaches every accepting member"
+else
+    bad "group send failed (sender $sender_status, alice $alice_status, bob $bob_status)"
+    sed 's/^/    /' "$WORK/sender-group.log" | tail -15
+    sed 's/^/    /' "$WORK/receiver-group-alice.log" | tail -10
+    sed 's/^/    /' "$WORK/receiver-group-bob.log" | tail -10
+fi
+
+# Wrong group password on join: alice holds the group, then bob tries the wrong password.
+DROP_ZONE_HOME="$WORK/alice" "$CLIENT" accept -y -o "$WORK/out-group-hold" --group=friends \
+    --force-transport=tcp > "$WORK/receiver-group-hold.log" 2>&1 <<EOF &
+$ALICE_PRIVATE
+EOF
+hold_pid=$!
+sleep 1.5
+DROP_ZONE_HOME="$WORK/bob" "$CLIENT" accept --once -y -o "$WORK/out-bad-group" --group=friends \
+    --force-transport=tcp > "$WORK/receiver-bad-group.log" 2>&1 <<EOF
+$BOB_PRIVATE
+wrong-group-password
+EOF
+if [[ $? -ne 0 ]] && grep -qi "wrong password" "$WORK/receiver-bad-group.log"; then
+    ok "a wrong group password is refused on join"
+else
+    bad "a wrong group password was accepted"
+    sed 's/^/    /' "$WORK/receiver-bad-group.log" | tail -10
+fi
+kill "$hold_pid" 2>/dev/null || true
+wait "$hold_pid" 2>/dev/null || true
+
+# Personal send still works while the receiver is also in a group.
+personal_out="$WORK/out-personal-in-group"
+rm -rf "$personal_out"
+mkdir -p "$personal_out"
+DROP_ZONE_HOME="$WORK/alice" "$CLIENT" accept --once -y -o "$personal_out" --group=friends \
+    --force-transport=tcp > "$WORK/receiver-personal-in-group.log" 2>&1 <<EOF &
+$ALICE_PRIVATE
+EOF
+alice_pid=$!
+sleep 1.5
+DROP_ZONE_HOME="$WORK/carol" "$CLIENT" send "$WORK/source/tree/text.txt" -t alice \
+    --force-transport=tcp > "$WORK/sender-personal-in-group.log" 2>&1 <<EOF
+$CAROL_PRIVATE
+$ALICE_PUBLIC
+EOF
+sender_status=$?
+wait "$alice_pid"
+alice_status=$?
+if [[ "$sender_status" -eq 0 && "$alice_status" -eq 0 ]] && \
+   cmp -s "$WORK/source/tree/text.txt" "$personal_out/text.txt"; then
+    ok "personal send still works while accepting in a group"
+else
+    bad "personal send while in a group failed"
+    sed 's/^/    /' "$WORK/sender-personal-in-group.log" | tail -10
+    sed 's/^/    /' "$WORK/receiver-personal-in-group.log" | tail -10
+fi
+
+# --------------------------------------------------------------------------
 # The server's promise
 # --------------------------------------------------------------------------
 

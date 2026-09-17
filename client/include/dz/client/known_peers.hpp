@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -60,16 +61,19 @@ public:
     void remember(const std::string& username,
                   const std::uint8_t identity_key[kEd25519PublicKeySize]);
 
-    /// The recorded key for `username`, or nullptr.
+    /// The recorded key for `username`, or nullptr. Not safe to keep across a
+    /// later remember() from another thread.
     const KnownPeer* find(const std::string& username) const;
 
     const std::vector<KnownPeer>& peers() const { return peers_; }
 
 private:
-    void save() const;
+    void save_unlocked() const;
 
     std::string path_;
     std::vector<KnownPeer> peers_;
+    /// Guards check/remember during parallel group fan-out.
+    mutable std::mutex mutex_;
 };
 
 }  // namespace dz::client

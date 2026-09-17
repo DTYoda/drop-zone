@@ -50,7 +50,9 @@ drop-zone send report.pdf -t alice       # sender
 | --- | --- |
 | `setup` | Create or update `~/.config/drop-zone/` |
 | `accept` | Wait for incoming files |
-| `send FILE... -t USER` | Send files or directories |
+| `accept --group=NAME` | Also join ephemeral group `NAME` (still reachable personally) |
+| `send FILE... -t USER` | Send files or directories to a username |
+| `send FILE... --group=NAME` | Send to everybody currently accepting in `NAME` |
 | `whoami` | Print this machine's username and identity fingerprint |
 | `status` | Print the configuration and which cipher this CPU will use |
 | `set-output DIR` | Permanently change where received files are saved |
@@ -59,7 +61,8 @@ drop-zone send report.pdf -t alice       # sender
 
 Useful flags, also listed in `drop-zone --help`:
 
-- `-o DIR` / `-p PASSWORD` / `--yes` / `--once` on accept
+- `-o DIR` / `-p PASSWORD` / `--yes` / `--once` / `--group=NAME` on accept
+- `--group=NAME` on send (mutually exclusive with `-t`)
 - `--no-encrypt` to skip payload encryption (refused on the relay)
 - `--verify` to hash every file as well as authenticating the chunks
 - `--force-transport=tcp\|udp\|relay` to skip the ladder
@@ -67,7 +70,11 @@ Useful flags, also listed in `drop-zone --help`:
 - `-v` / `--verbose` to show TCP/UDP/relay attempts and other connection details
 - `-q` / `--quiet` to only report problems
 
-Passwords prompted on the terminal are not echoed. Passing `-p` on send puts the recipient's public password in the shell history; omit it and drop-zone will ask. Passing `-p` on accept overrides your stored public password for that run only.
+Passwords prompted on the terminal are not echoed. Passing `-p` on send puts the recipient's (or group's) public password in the shell history; omit it and drop-zone will ask. Passing `-p` on accept overrides your stored public password for that run only.
+
+### Groups
+
+A group exists only while at least one member is running `accept --group=NAME`. The first person to join sets the group password to their own public password; later joiners are prompted for it. `send --group=NAME` transfers to every member who is accepting at that moment — offline people are simply not in the group. Personal sends (`-t alice`) still work while someone is also in a group.
 
 ## How a transfer actually happens
 

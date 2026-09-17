@@ -270,6 +270,29 @@ DZ_TEST(the_public_password_key_depends_on_the_username) {
     DZ_CHECK(derive_public_password_key("other-password", "alice") != alice);
 }
 
+DZ_TEST(a_group_verifier_depends_on_the_password_and_the_name) {
+    Key alice = derive_public_password_key("shared-password", "friends");
+    std::uint8_t first[kSha256Size];
+    std::uint8_t again[kSha256Size];
+    derive_group_verifier(alice, "friends", first);
+    derive_group_verifier(alice, "friends", again);
+    DZ_CHECK(std::memcmp(first, again, kSha256Size) == 0);
+
+    Key other_password = derive_public_password_key("other-password", "friends");
+    std::uint8_t other[kSha256Size];
+    derive_group_verifier(other_password, "friends", other);
+    DZ_CHECK(std::memcmp(first, other, kSha256Size) != 0);
+
+    std::uint8_t other_group[kSha256Size];
+    derive_group_verifier(alice, "enemies", other_group);
+    DZ_CHECK(std::memcmp(first, other_group, kSha256Size) != 0);
+
+    // The group key is salted with the group name, so the same password used as
+    // a personal public password does not produce the same MAC key.
+    Key personal = derive_public_password_key("shared-password", "alice");
+    DZ_CHECK(alice != personal);
+}
+
 DZ_TEST(standalone_sealing_round_trips_and_detects_tampering) {
     Key key = key_from_byte(0x99);
     std::string plaintext = "a sealed manifest the server cannot read";
