@@ -3,12 +3,12 @@
 // Two files live in ~/.config/drop-zone, both mode 0600:
 //
 //   config.toml    username, server address, and preferences. No secrets.
-//   identity.key   the Ed25519 identity, sealed under the private password.
+//   identity.key   the Ed25519 identity and the public password, sealed under
+//                  the private password.
 //
-// The public password is not stored in either. It is not a secret the client
-// needs -- the client is the side that already knows it -- and keeping it out of
-// the config means reading config.toml tells an attacker nothing they could use
-// to receive files as this user.
+// The public password is not in config.toml. It is sealed inside identity.key
+// so `accept` can reuse what setup chose, without leaving a secret that
+// reading the config file would be enough to learn.
 
 #pragma once
 

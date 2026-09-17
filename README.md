@@ -42,7 +42,7 @@ drop-zone accept                         # receiver; files land in ./
 drop-zone send report.pdf -t alice       # sender
 ```
 
-`setup` asks for a username, a private password (seals the identity keystore) and a public password (what senders type to prove they are allowed to reach you). Neither password is stored in the clear; the public password is not stored at all. The official public rendezvous server (`129.153.161.241`) is used by default; change it later with `drop-zone set-server HOST[:PORT]`. Received files land in the current directory; change the default with `drop-zone set-output DIR`, or pass `-o DIR` on a single `accept`.
+`setup` asks for a username, a private password (seals the identity keystore) and a public password (what senders type to prove they are allowed to reach you). Neither password is stored in the clear: the public password is sealed inside `identity.key` under the private password, so `accept` can reuse it. The official public rendezvous server (`129.153.161.241`) is used by default; change it later with `drop-zone set-server HOST[:PORT]`. Received files land in the current directory; change the default with `drop-zone set-output DIR`, or pass `-o DIR` on a single `accept`. Change the public password with `drop-zone set-public-password`, or pass `-p` on a single `accept`.
 
 ## Commands
 
@@ -54,11 +54,12 @@ drop-zone send report.pdf -t alice       # sender
 | `whoami` | Print this machine's username and identity fingerprint |
 | `status` | Print the configuration and which cipher this CPU will use |
 | `set-output DIR` | Permanently change where received files are saved |
+| `set-public-password` | Permanently change the public password senders use |
 | `set-server HOST[:PORT]` | Permanently change the rendezvous server |
 
 Useful flags, also listed in `drop-zone --help`:
 
-- `-o DIR` / `--yes` / `--once` on accept
+- `-o DIR` / `-p PASSWORD` / `--yes` / `--once` on accept
 - `--no-encrypt` to skip payload encryption (refused on the relay)
 - `--verify` to hash every file as well as authenticating the chunks
 - `--force-transport=tcp\|udp\|relay` to skip the ladder
@@ -66,7 +67,7 @@ Useful flags, also listed in `drop-zone --help`:
 - `-v` / `--verbose` to show TCP/UDP/relay attempts and other connection details
 - `-q` / `--quiet` to only report problems
 
-Passwords prompted on the terminal are not echoed. Passing `-p` puts the public password in the shell history; omit it and drop-zone will ask.
+Passwords prompted on the terminal are not echoed. Passing `-p` on send puts the recipient's public password in the shell history; omit it and drop-zone will ask. Passing `-p` on accept overrides your stored public password for that run only.
 
 ## How a transfer actually happens
 
@@ -127,7 +128,7 @@ Lives in `$DROP_ZONE_HOME`, else `$XDG_CONFIG_HOME/drop-zone`, else `~/.config/d
 | File | Mode | Contents |
 | --- | --- | --- |
 | `config.toml` | 0600 | username, server, preferences. No secrets. |
-| `identity.key` | 0600 | Ed25519 private key, sealed with scrypt + AES-256-GCM (or ChaCha20-Poly1305) under the private password |
+| `identity.key` | 0600 | Ed25519 private key and public password, sealed with scrypt + AES-256-GCM (or ChaCha20-Poly1305) under the private password |
 | `known_peers` | 0600 | TOFU pins, one username and fingerprint per line |
 
 ## License
