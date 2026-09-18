@@ -182,6 +182,9 @@ reflected as a receiver answer: the two directions MAC different tags
 (`drop-zone/v1 udp punch sender` / `... receiver`).
 
 Once both sides have a verified reply, they run the reliable UDP protocol below.
+Hearing a probe without a matching PunchAck is not enough: both peers must
+confirm the path, otherwise one side can commit to UDP while the other falls
+through to the relay.
 
 ### Tier 3 — server relay
 

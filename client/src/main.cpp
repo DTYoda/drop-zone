@@ -610,13 +610,14 @@ int command_accept(const CommandLine& args) {
                 return 0;
             }
 
-            // The relay tier tunnels through the control connection, so once a
-            // transfer has used it that connection is no longer usable.
-            if (channel->kind() == TransportKind::ServerRelay) {
-                log::info("that transfer used the relay, so reconnecting");
-                need_reconnect = true;
-                break;
-            }
+            // Always reconnect after a transfer. The relay tier consumes the
+            // control connection; a direct TCP/UDP transfer leaves the pairing
+            // live on the server until the sender hangs up, which used to inject
+            // a RelayClose that the next say_hello then misread as a protocol
+            // error. A fresh control connection avoids both.
+            log::info("reconnect after transfer (" + std::string(channel->describe()) + ")");
+            need_reconnect = true;
+            break;
         }
 
         control.say_goodbye();
