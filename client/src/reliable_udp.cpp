@@ -28,6 +28,10 @@ constexpr const char* kPunchReceiverTag = "drop-zone/v1 udp punch receiver";
 /// created by the peer's first probe is still open when ours arrives, and sparse
 /// enough not to look like a flood.
 constexpr int kPunchIntervalMs = 50;
+/// After the first PunchAck, keep answering for this long so the peer can still
+/// collect an ack before we leave the punch loop. Waiting the full UDP budget
+/// made every LAN transfer pay the entire 4 s timeout.
+constexpr std::uint32_t kPunchAckGraceMs = 500;
 
 /// Deliver at most this much before the reorder buffer is considered abusive.
 /// Bounds what a peer can make us hold by sending a window with a permanent hole.
@@ -132,10 +136,17 @@ bool punch_udp_path(int socket_fd, const std::vector<Endpoint>& raw_candidates,
     // Waiting for both directions means neither peer commits to a path the other
     // cannot use.
     bool peer_seen = false;
+    bool got_ack = false;
+    std::uint64_t ack_commit_at = 0;
     Endpoint peer_address;
 
     while (monotonic_millis() < deadline) {
         std::uint64_t now = monotonic_millis();
+
+        if (got_ack && now >= ack_commit_at) {
+            log::debug("UDP punch: committing to " + chosen.to_string());
+            return true;
+        }
 
         if (now >= next_probe) {
             // Probe every candidate on every round rather than trying them in
@@ -183,18 +194,29 @@ bool punch_udp_path(int socket_fd, const std::vector<Endpoint>& raw_candidates,
             Endpoint from = Endpoint::from_sockaddr(reinterpret_cast<sockaddr*>(&storage), length);
 
             if (header.type == UdpPacketType::PunchAck) {
-                // The peer has seen our probe, so the path works in both
-                // directions.
-                chosen = from;
-                log::debug("UDP punch: path confirmed with " + from.to_string());
-                return true;
+                // The peer has seen our probe. Keep answering briefly so the other
+                // side still has PunchAcks to receive; leaving on the first ack is
+                // what made one peer commit to UDP while the other fell through to
+                // a relay that no longer had a live pairing.
+                if (!got_ack) {
+                    chosen = from;
+                    got_ack = true;
+                    ack_commit_at = now + kPunchAckGraceMs;
+                    if (ack_commit_at > deadline) ack_commit_at = deadline;
+                    log::debug("UDP punch: path confirmed with " + from.to_string() +
+                               "; keeping the punch open briefly for the peer");
+                }
+                peer_seen = true;
+                peer_address = from;
+                std::memcpy(reply + kUdpHeaderSize, own_proof, kSha256Size);
+                (void)::sendto(socket_fd, reply, sizeof(reply), 0, from.sockaddr_ptr(),
+                               from.sockaddr_len());
+                continue;
             }
 
             // A probe. Answer it, and remember where from so later rounds keep
             // answering until one of our answers gets through. Do not commit to
-            // the path yet: PROTOCOL.md requires a confirmed two-way punch, and
-            // treating inbound-only probes as success is what made campus Wi‑Fi
-            // pick flaky UDP instead of falling through to the relay.
+            // the path yet: PROTOCOL.md requires a confirmed two-way punch.
             peer_seen = true;
             peer_address = from;
             std::memcpy(reply + kUdpHeaderSize, own_proof, kSha256Size);
@@ -203,6 +225,10 @@ bool punch_udp_path(int socket_fd, const std::vector<Endpoint>& raw_candidates,
         }
     }
 
+    if (got_ack) {
+        log::debug("UDP punch: committing to " + chosen.to_string());
+        return true;
+    }
     if (peer_seen) {
         log::debug("UDP punch: heard from " + peer_address.to_string() +
                    " but never got a PunchAck; not committing to a one-way path");

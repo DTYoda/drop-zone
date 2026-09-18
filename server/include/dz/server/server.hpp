@@ -115,6 +115,7 @@ private:
     void handle_reflexive_probes(Shard& shard);
     void drain_wake_queue(Shard& shard);
     void service_connection(Shard& shard, const ConnectionPtr& connection, const ReadyEvent& event);
+    void maybe_resume_relay_peer(const ConnectionPtr& connection);
     void update_interest(Shard& shard, const ConnectionPtr& connection);
     void close_connection(Shard& shard, const ConnectionPtr& connection);
     void run_maintenance(Shard& shard, std::uint64_t now_ms);

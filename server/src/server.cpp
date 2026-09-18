@@ -357,6 +357,22 @@ void Server::drain_wake_queue(Shard& shard) {
     }
 }
 
+void Server::maybe_resume_relay_peer(const ConnectionPtr& connection) {
+    // A fast sender is paused once this connection's output queue is full. Resume
+    // it only after the queue has drained past the lower watermark. Must run after
+    // every flush: checking only the first writable flush left TransferEnd sitting
+    // in the sender's socket buffer when a later flush emptied the queue without
+    // re-arming the source.
+    if (connection->state != ConnectionState::Relaying) return;
+    if (connection->pending_output() > kRelayResumeThreshold) return;
+
+    ConnectionPtr peer = connection->relay_peer();
+    if (peer == nullptr || !peer->read_paused()) return;
+
+    peer->set_read_paused(false);
+    wake_for(peer);
+}
+
 void Server::service_connection(Shard& shard, const ConnectionPtr& connection,
                                 const ReadyEvent& event) {
     connection->last_activity_ms = monotonic_millis();
@@ -366,18 +382,7 @@ void Server::service_connection(Shard& shard, const ConnectionPtr& connection,
             close_connection(shard, connection);
             return;
         }
-
-        // Draining this connection's queue may be what a paused relay source is
-        // waiting for.
-        if (connection->state == ConnectionState::Relaying &&
-            connection->pending_output() <= kRelayResumeThreshold) {
-            if (ConnectionPtr peer = connection->relay_peer()) {
-                if (peer->read_paused()) {
-                    peer->set_read_paused(false);
-                    wake_for(peer);
-                }
-            }
-        }
+        maybe_resume_relay_peer(connection);
     }
 
     if (!connection->read_paused() && (event.readable || connection->input_at_cap())) {
@@ -405,6 +410,7 @@ void Server::service_connection(Shard& shard, const ConnectionPtr& connection,
                     close_connection(shard, connection);
                     return;
                 }
+                maybe_resume_relay_peer(connection);
                 close_connection(shard, connection);
                 return;
             }
@@ -422,6 +428,7 @@ void Server::service_connection(Shard& shard, const ConnectionPtr& connection,
         close_connection(shard, connection);
         return;
     }
+    maybe_resume_relay_peer(connection);
 
     if (connection->close_requested() && !connection->wants_write()) {
         close_connection(shard, connection);
@@ -459,11 +466,12 @@ void Server::close_connection(Shard& shard, const ConnectionPtr& connection) {
         connection->joined_group.clear();
     }
 
-    // Tell the other half of a pairing, so a peer waiting on an introduction
-    // learns immediately instead of after a timeout. Direct TCP/UDP transfers
-    // never tell the server they finished, so the pairing is still live when the
-    // sender hangs up: reset a matched receiver back to idle instead of closing
-    // it with RelayClose, which would poison the next ClientHello refresh.
+    // Tell the other half of a pairing, so a peer waiting on an introduction or
+    // mid-ladder learns immediately instead of after a timeout. Always close the
+    // peer: silently clearing a matched receiver's pairing_id left them to hit
+    // "no pairing to relay" when the auto ladder fell through after the sender
+    // had already gone. Continuous accept reconnects after each transfer, so a
+    // RelayClose here cannot poison the next ServerHello.
     if (connection->pairing_id != 0) {
         Pairing pairing;
         if (sessions_.find_pairing(connection->pairing_id, pairing)) {
@@ -472,22 +480,10 @@ void Server::close_connection(Shard& shard, const ConnectionPtr& connection) {
             ConnectionPtr other = (sender == connection) ? receiver : sender;
 
             if (other != nullptr && other != connection) {
-                // Direct transfers leave the receiver in ReceiverMatched with no
-                // relay. Closing them would make the next ClientHello read a
-                // RelayClose. Put them back to idle so continuous accept works.
-                const bool reset_matched_receiver =
-                    other == receiver && other->state == ConnectionState::ReceiverMatched &&
-                    !pairing.relay_active;
-
-                if (reset_matched_receiver) {
-                    other->state = ConnectionState::ReceiverIdle;
-                    other->pairing_id = 0;
-                } else {
-                    static const std::string kReason = "the other peer disconnected";
-                    other->enqueue_frame(MessageType::RelayClose, kReason.data(), kReason.size());
-                    other->request_close(kReason);
-                    wake_for(other);
-                }
+                static const std::string kReason = "the other peer disconnected";
+                other->enqueue_frame(MessageType::RelayClose, kReason.data(), kReason.size());
+                other->request_close(kReason);
+                wake_for(other);
             }
         }
         sessions_.destroy_pairing(connection->pairing_id);

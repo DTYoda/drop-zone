@@ -159,7 +159,17 @@ ChannelPtr open_server_relay(const TransportRequest& request) {
         if (frame.header.type == MessageType::RelayClose) {
             fail_user("the other peer gave up before the relay opened");
         }
-        // Anything else, a keep-alive included, is ignored while waiting.
+        if (frame.header.type == MessageType::Incoming) {
+            // The server thinks we are idle again (for example after a peer
+            // dropped mid-ladder) and forwarded a new introduction onto this
+            // control socket. Abort so accept can reconnect rather than
+            // discarding the Incoming and leaving both peers hung.
+            fail_user("a new introduction arrived while opening the relay; reconnecting");
+        }
+        if (frame.header.type == MessageType::KeepAlive) continue;
+
+        fail(std::string("the server sent a ") + message_type_name(frame.header.type) +
+             " frame while opening the relay");
     }
 
     fail("the relay did not open within 30 seconds");

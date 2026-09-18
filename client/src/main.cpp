@@ -504,10 +504,94 @@ int command_accept(const CommandLine& args) {
     }
 
     // The group password key is derived on the first successful join and reused
-    // after a relay forces a reconnect.
+    // after a reconnect. Join-first (not query-first) so two people starting at
+    // once do not both think they created the group with different passwords.
     std::unique_ptr<Key> group_password_key;
     SecretString cached_group_password;
     bool group_password_known = false;
+
+    auto ensure_group_membership = [&](ControlConnection& control) {
+        if (args.group.empty()) return;
+
+        auto try_join = [&](const Key& key) -> GroupResult {
+            return join_group(control, args.group, key);
+        };
+
+        auto apply_outcome = [&](const GroupResult& result, bool created_with_personal) {
+            switch (result.outcome) {
+                case GroupJoinOutcome::Created:
+                    if (!args.quiet) {
+                        if (created_with_personal) {
+                            std::fprintf(stderr,
+                                         "created group %s; its password is your public "
+                                         "password (%u member%s)\n",
+                                         args.group.c_str(), result.member_count,
+                                         result.member_count == 1 ? "" : "s");
+                        } else {
+                            std::fprintf(stderr, "%s (%u member%s)\n", result.message.c_str(),
+                                         result.member_count,
+                                         result.member_count == 1 ? "" : "s");
+                        }
+                    }
+                    return true;
+                case GroupJoinOutcome::Joined:
+                case GroupJoinOutcome::AlreadyMember:
+                    if (!args.quiet) {
+                        std::fprintf(stderr, "%s (%u member%s)\n", result.message.c_str(),
+                                     result.member_count, result.member_count == 1 ? "" : "s");
+                    }
+                    return true;
+                case GroupJoinOutcome::WrongPassword:
+                    return false;
+                case GroupJoinOutcome::Full:
+                    fail_user("group '" + args.group + "' is full");
+                case GroupJoinOutcome::InvalidName:
+                    fail_user("'" + args.group + "' is not a usable group name");
+            }
+            return false;
+        };
+
+        if (!group_password_known) {
+            // First attempt: personal public password. Creates the group when
+            // empty; joins when someone else already set that same password.
+            Key personal_as_group = derive_public_password_key(
+                std::string_view(public_password.data(), public_password.size()), args.group);
+            GroupResult result = try_join(personal_as_group);
+            if (apply_outcome(result, /*created_with_personal=*/true)) {
+                group_password_key = std::make_unique<Key>(std::move(personal_as_group));
+                cached_group_password = public_password;
+                group_password_known = true;
+                return;
+            }
+
+            // Group exists under a different password — ask and retry once.
+            cached_group_password = read_password("Group " + args.group + "'s password: ");
+            group_password_key = std::make_unique<Key>(derive_public_password_key(
+                std::string_view(cached_group_password.data(), cached_group_password.size()),
+                args.group));
+            result = try_join(*group_password_key);
+            if (!apply_outcome(result, /*created_with_personal=*/false)) {
+                fail_user("wrong password for group '" + args.group + "'");
+            }
+            group_password_known = true;
+            return;
+        }
+
+        GroupResult result = try_join(*group_password_key);
+        if (apply_outcome(result, /*created_with_personal=*/false)) return;
+
+        // Cached password no longer matches (group was recreated). Re-prompt.
+        group_password_known = false;
+        cached_group_password = read_password("Group " + args.group + "'s password: ");
+        group_password_key = std::make_unique<Key>(derive_public_password_key(
+            std::string_view(cached_group_password.data(), cached_group_password.size()),
+            args.group));
+        result = try_join(*group_password_key);
+        if (!apply_outcome(result, /*created_with_personal=*/false)) {
+            fail_user("wrong password for group '" + args.group + "'");
+        }
+        group_password_known = true;
+    };
 
     for (;;) {
         ControlConnection control(config, args.server_host, args.server_port);
@@ -525,49 +609,7 @@ int command_accept(const CommandLine& args) {
                                                   session_keys.public_key, sockets);
             if (!announced) {
                 if (!args.quiet) std::fprintf(stderr, "%s\n", hello.message.c_str());
-
-                if (!args.group.empty()) {
-                    if (!group_password_known) {
-                        GroupStatus status = query_group(control, args.group);
-                        if (!status.exists) {
-                            cached_group_password = public_password;
-                            if (!args.quiet) {
-                                std::fprintf(stderr,
-                                             "creating group %s; its password is your public "
-                                             "password\n",
-                                             args.group.c_str());
-                            }
-                        } else {
-                            cached_group_password =
-                                read_password("Group " + args.group + "'s password: ");
-                        }
-                        group_password_key = std::make_unique<Key>(derive_public_password_key(
-                            std::string_view(cached_group_password.data(),
-                                             cached_group_password.size()),
-                            args.group));
-                        group_password_known = true;
-                    }
-
-                    GroupResult result = join_group(control, args.group, *group_password_key);
-                    switch (result.outcome) {
-                        case GroupJoinOutcome::Created:
-                        case GroupJoinOutcome::Joined:
-                        case GroupJoinOutcome::AlreadyMember:
-                            if (!args.quiet) {
-                                std::fprintf(stderr, "%s (%u member%s)\n", result.message.c_str(),
-                                             result.member_count,
-                                             result.member_count == 1 ? "" : "s");
-                            }
-                            break;
-                        case GroupJoinOutcome::WrongPassword:
-                            fail_user("wrong password for group '" + args.group + "'");
-                        case GroupJoinOutcome::Full:
-                            fail_user("group '" + args.group + "' is full");
-                        case GroupJoinOutcome::InvalidName:
-                            fail_user("'" + args.group + "' is not a usable group name");
-                    }
-                }
-
+                ensure_group_membership(control);
                 announced = true;
             }
 
@@ -586,7 +628,29 @@ int command_accept(const CommandLine& args) {
             request.control = &control.stream();
             request.pairing_id = introduction.pairing_id;
 
-            ChannelPtr channel = establish_channel(sockets, request);
+            if (!args.quiet) {
+                std::fprintf(stderr, "introduced to %s; negotiating a path...\n",
+                             introduction.peer_username.c_str());
+            }
+
+            ChannelPtr channel;
+            try {
+                channel = establish_channel(sockets, request);
+            } catch (const std::exception& error) {
+                log::warn(std::string("could not open a path to ") + introduction.peer_username +
+                          ": " + error.what());
+                if (!args.quiet) {
+                    std::fprintf(stderr, "could not reach %s (%s)\n",
+                                 introduction.peer_username.c_str(), error.what());
+                }
+                if (args.once) {
+                    control.say_goodbye();
+                    return 1;
+                }
+                need_reconnect = true;
+                break;
+            }
+
             log::info(std::string("connected: ") + channel->describe());
 
             ReceiveOptions options;
@@ -595,8 +659,24 @@ int command_accept(const CommandLine& args) {
             options.verify_digests = args.verify_set ? args.verify : config.verify_digests;
             options.quiet = args.quiet;
 
-            ReceiveResult result = receive_transfer(*channel, introduction.keys,
-                                                    introduction.peer_username, options);
+            ReceiveResult result;
+            try {
+                result = receive_transfer(*channel, introduction.keys, introduction.peer_username,
+                                          options);
+            } catch (const std::exception& error) {
+                log::warn(std::string("transfer from ") + introduction.peer_username +
+                          " failed: " + error.what());
+                if (!args.quiet) {
+                    std::fprintf(stderr, "transfer from %s failed: %s\n",
+                                 introduction.peer_username.c_str(), error.what());
+                }
+                if (args.once) {
+                    control.say_goodbye();
+                    return 1;
+                }
+                need_reconnect = true;
+                break;
+            }
 
             channel->close_gracefully();
 
@@ -612,9 +692,8 @@ int command_accept(const CommandLine& args) {
 
             // Always reconnect after a transfer. The relay tier consumes the
             // control connection; a direct TCP/UDP transfer leaves the pairing
-            // live on the server until the sender hangs up, which used to inject
-            // a RelayClose that the next say_hello then misread as a protocol
-            // error. A fresh control connection avoids both.
+            // live on the server until the sender hangs up. A fresh control
+            // connection avoids a stale RelayClose on the next say_hello.
             log::info("reconnect after transfer (" + std::string(channel->describe()) + ")");
             need_reconnect = true;
             break;
