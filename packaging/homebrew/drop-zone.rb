@@ -17,8 +17,8 @@
 class DropZone < Formula
   desc "Peer-to-peer terminal file transfer"
   homepage "https://github.com/DTYoda/drop-zone"
-  url "https://github.com/DTYoda/drop-zone/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "397a833fe68ee88a550f1dc5679a484f0554bfdc225a2a810931d9f54b0f5337"
+  url "https://github.com/DTYoda/drop-zone/archive/refs/tags/v1.1.0.tar.gz"
+  sha256 "d1d49077371352a3328a150cce108f7876ca793c2d5f37458ffb9bc630a14212"
   license "MIT"
   head "https://github.com/DTYoda/drop-zone.git", branch: "main"
 
