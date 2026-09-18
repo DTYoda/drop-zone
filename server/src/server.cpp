@@ -454,9 +454,16 @@ void Server::close_connection(Shard& shard, const ConnectionPtr& connection) {
     if (!connection->claimed_username.empty()) {
         sessions_.release(connection->claimed_username, connection.get());
     }
+    if (!connection->joined_group.empty()) {
+        sessions_.leave_group(connection->joined_group, connection.get());
+        connection->joined_group.clear();
+    }
 
     // Tell the other half of a pairing, so a peer waiting on an introduction
-    // learns immediately instead of after a timeout.
+    // learns immediately instead of after a timeout. Direct TCP/UDP transfers
+    // never tell the server they finished, so the pairing is still live when the
+    // sender hangs up: reset a matched receiver back to idle instead of closing
+    // it with RelayClose, which would poison the next ClientHello refresh.
     if (connection->pairing_id != 0) {
         Pairing pairing;
         if (sessions_.find_pairing(connection->pairing_id, pairing)) {
@@ -465,10 +472,22 @@ void Server::close_connection(Shard& shard, const ConnectionPtr& connection) {
             ConnectionPtr other = (sender == connection) ? receiver : sender;
 
             if (other != nullptr && other != connection) {
-                static const std::string kReason = "the other peer disconnected";
-                other->enqueue_frame(MessageType::RelayClose, kReason.data(), kReason.size());
-                other->request_close(kReason);
-                wake_for(other);
+                // Direct transfers leave the receiver in ReceiverMatched with no
+                // relay. Closing them would make the next ClientHello read a
+                // RelayClose. Put them back to idle so continuous accept works.
+                const bool reset_matched_receiver =
+                    other == receiver && other->state == ConnectionState::ReceiverMatched &&
+                    !pairing.relay_active;
+
+                if (reset_matched_receiver) {
+                    other->state = ConnectionState::ReceiverIdle;
+                    other->pairing_id = 0;
+                } else {
+                    static const std::string kReason = "the other peer disconnected";
+                    other->enqueue_frame(MessageType::RelayClose, kReason.data(), kReason.size());
+                    other->request_close(kReason);
+                    wake_for(other);
+                }
             }
         }
         sessions_.destroy_pairing(connection->pairing_id);
@@ -531,6 +550,15 @@ void Server::handle_frame(Shard& shard, const ConnectionPtr& connection, const F
             return;
         case MessageType::SendRequest:
             handle_send_request(connection, frame);
+            return;
+        case MessageType::GroupQuery:
+            handle_group_query(connection, frame);
+            return;
+        case MessageType::GroupJoin:
+            handle_group_join(connection, frame);
+            return;
+        case MessageType::GroupSendRequest:
+            handle_group_send_request(connection, frame);
             return;
         case MessageType::Accept:
             handle_accept(connection, frame);
@@ -677,6 +705,7 @@ void Server::handle_send_request(const ConnectionPtr& connection, const Frame& f
     std::memcpy(introduction.signature, request.signature, sizeof(introduction.signature));
     introduction.pairing_id = pairing_id;
     introduction.transport_hint = request.transport_hint;
+    introduction.group_name = request.group_name;
 
     // The candidate list is the sender's own addresses plus the one only the
     // server can supply: how the sender looks from outside its NAT.
@@ -690,6 +719,93 @@ void Server::handle_send_request(const ConnectionPtr& connection, const Frame& f
 
     total_introductions_.fetch_add(1);
     log::debug(connection->label() + " introduced to " + receiver->label());
+}
+
+void Server::handle_group_query(const ConnectionPtr& connection, const Frame& frame) {
+    if (!connection->hello_received) {
+        reject_and_close(connection, "say hello before querying a group");
+        return;
+    }
+
+    GroupQuery query = GroupQuery::decode(frame.payload);
+    GroupStatus status;
+    status.exists = sessions_.group_exists(query.name);
+    status.member_count = static_cast<std::uint32_t>(sessions_.group_member_count(query.name));
+    connection->enqueue_frame(MessageType::GroupStatus, status.encode());
+}
+
+void Server::handle_group_join(const ConnectionPtr& connection, const Frame& frame) {
+    if (connection->state != ConnectionState::ReceiverIdle) {
+        reject_and_close(connection, "only a receiver that is accepting may join a group");
+        return;
+    }
+
+    GroupJoin join = GroupJoin::decode(frame.payload);
+
+    // One group per connection. Leaving first keeps the old group's last-member
+    // teardown correct when this peer is moving to a different name.
+    if (!connection->joined_group.empty() && connection->joined_group != join.name) {
+        sessions_.leave_group(connection->joined_group, connection.get());
+        connection->joined_group.clear();
+    }
+
+    GroupJoinResult result = sessions_.join_group(join.name, join.verifier, connection);
+
+    GroupResult reply;
+    switch (result) {
+        case GroupJoinResult::Created:
+            connection->joined_group = join.name;
+            reply.outcome = GroupJoinOutcome::Created;
+            reply.message = "created group " + join.name;
+            break;
+        case GroupJoinResult::Joined:
+            connection->joined_group = join.name;
+            reply.outcome = GroupJoinOutcome::Joined;
+            reply.message = "joined group " + join.name;
+            break;
+        case GroupJoinResult::AlreadyMember:
+            connection->joined_group = join.name;
+            reply.outcome = GroupJoinOutcome::AlreadyMember;
+            reply.message = "already in group " + join.name;
+            break;
+        case GroupJoinResult::WrongPassword:
+            reply.outcome = GroupJoinOutcome::WrongPassword;
+            reply.message = "wrong password for group " + join.name;
+            break;
+        case GroupJoinResult::Full:
+            reply.outcome = GroupJoinOutcome::Full;
+            reply.message = "group '" + join.name + "' is full";
+            break;
+        case GroupJoinResult::InvalidName:
+            reply.outcome = GroupJoinOutcome::InvalidName;
+            reply.message = "'" + join.name + "' is not a usable group name";
+            break;
+    }
+    reply.member_count = static_cast<std::uint32_t>(sessions_.group_member_count(join.name));
+    connection->enqueue_frame(MessageType::GroupResult, reply.encode());
+}
+
+void Server::handle_group_send_request(const ConnectionPtr& connection, const Frame& frame) {
+    if (connection->state != ConnectionState::SenderIdle) {
+        reject_and_close(connection, "only a sender that has said hello may request a group");
+        return;
+    }
+
+    if (!rate_limiter_.allow_request(connection->rate_limit_key, monotonic_millis())) {
+        reject_and_close(connection, "too many requests, try again in a minute");
+        return;
+    }
+
+    GroupSendRequest request = GroupSendRequest::decode(frame.payload);
+    std::vector<ConnectionPtr> members =
+        sessions_.idle_group_members(request.name, connection->hello.username);
+
+    GroupRoster roster;
+    roster.usernames.reserve(members.size());
+    for (const ConnectionPtr& member : members) {
+        roster.usernames.push_back(member->claimed_username);
+    }
+    connection->enqueue_frame(MessageType::GroupRoster, roster.encode());
 }
 
 void Server::handle_accept(const ConnectionPtr& connection, const Frame& frame) {

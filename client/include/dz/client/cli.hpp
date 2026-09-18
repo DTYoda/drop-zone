@@ -37,12 +37,18 @@ struct CommandLine {
     /// Files or directories to send.
     std::vector<std::string> inputs;
 
-    /// Username to send to.
+    /// Username to send to. Empty when sending to a group instead.
     std::string target;
 
-    /// Public password from `-p`. On send this is the target's, and an empty
-    /// value prompts. On accept it overrides the stored public password for
-    /// this run only; empty means use the one sealed at setup.
+    /// Ephemeral group to join on accept, or to fan out to on send. Empty means
+    /// personal-only. Mutually exclusive with `target` on send.
+    std::string group;
+
+    /// Public password from `-p`. On personal send this is the target's; on
+    /// group send it is the group's. Empty prompts. On accept it overrides the
+    /// stored public password for this run only; empty means use the one sealed
+    /// at setup. For joining an existing group, the group password is prompted
+    /// separately when needed.
     std::string public_password;
 
     /// Where received files go. Empty means the configured default, and failing

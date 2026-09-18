@@ -24,6 +24,12 @@ const char* message_type_name(MessageType type) {
         case MessageType::RelayClose: return "RelayClose";
         case MessageType::KeepAlive: return "KeepAlive";
         case MessageType::Bye: return "Bye";
+        case MessageType::GroupQuery: return "GroupQuery";
+        case MessageType::GroupStatus: return "GroupStatus";
+        case MessageType::GroupJoin: return "GroupJoin";
+        case MessageType::GroupResult: return "GroupResult";
+        case MessageType::GroupSendRequest: return "GroupSendRequest";
+        case MessageType::GroupRoster: return "GroupRoster";
         case MessageType::Offer: return "Offer";
         case MessageType::Decision: return "Decision";
         case MessageType::Chunk: return "Chunk";

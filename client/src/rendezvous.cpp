@@ -48,9 +48,15 @@ void append_field(std::vector<std::uint8_t>& out, std::string_view text) {
 std::vector<std::uint8_t> sender_proof_input(const std::string& sender_username,
                                              const std::string& receiver_username,
                                              const std::uint8_t sender_session_key[kX25519KeySize],
-                                             const std::uint8_t sender_identity_key[kEd25519PublicKeySize]) {
+                                             const std::uint8_t sender_identity_key[kEd25519PublicKeySize],
+                                             const std::string& group_name = {}) {
     std::vector<std::uint8_t> input;
-    append_field(input, kMacContextSenderProof);
+    if (group_name.empty()) {
+        append_field(input, kMacContextSenderProof);
+    } else {
+        append_field(input, kMacContextGroupSenderProof);
+        append_field(input, group_name);
+    }
     append_field(input, sender_username);
     append_field(input, receiver_username);
     append_field(input, sender_session_key, kX25519KeySize);
@@ -65,9 +71,15 @@ std::vector<std::uint8_t> receiver_proof_input(
     const std::uint8_t sender_session_key[kX25519KeySize],
     const std::uint8_t sender_identity_key[kEd25519PublicKeySize],
     const std::uint8_t receiver_session_key[kX25519KeySize],
-    const std::uint8_t receiver_identity_key[kEd25519PublicKeySize]) {
+    const std::uint8_t receiver_identity_key[kEd25519PublicKeySize],
+    const std::string& group_name = {}) {
     std::vector<std::uint8_t> input;
-    append_field(input, kMacContextReceiverProof);
+    if (group_name.empty()) {
+        append_field(input, kMacContextReceiverProof);
+    } else {
+        append_field(input, kMacContextGroupReceiverProof);
+        append_field(input, group_name);
+    }
     append_field(input, sender_username);
     append_field(input, receiver_username);
     append_field(input, sender_session_key, kX25519KeySize);
@@ -272,18 +284,22 @@ Introduction request_introduction(ControlConnection& control, const Config& conf
                                   const Identity& identity, const X25519KeyPair& session_keys,
                                   const std::string& target_username,
                                   std::string_view public_password, TransportKind transport_hint,
-                                  KnownPeers& known_peers) {
+                                  KnownPeers& known_peers, const std::string& group_name) {
     // Stretching the password is the slow part of a send, on the order of a tenth
     // of a second. That cost is the point: it is what an attacker guessing the
-    // password would have to pay per guess.
-    Key password_key = derive_public_password_key(public_password, target_username);
+    // password would have to pay per guess. Group sends salt with the group name
+    // so a group proof cannot be replayed as a personal one.
+    const std::string& password_salt = group_name.empty() ? target_username : group_name;
+    Key password_key = derive_public_password_key(public_password, password_salt);
 
-    std::vector<std::uint8_t> proof_input = sender_proof_input(
-        config.username, target_username, session_keys.public_key, identity.keys.public_key);
+    std::vector<std::uint8_t> proof_input =
+        sender_proof_input(config.username, target_username, session_keys.public_key,
+                           identity.keys.public_key, group_name);
 
     SendRequest request;
     request.target_username = target_username;
     request.transport_hint = transport_hint;
+    request.group_name = group_name;
     hmac_sha256(password_key.data(), password_key.size(), proof_input.data(), proof_input.size(),
                 request.proof);
     ed25519_sign(identity.keys.secret, proof_input.data(), proof_input.size(), request.signature);
@@ -304,7 +320,8 @@ Introduction request_introduction(ControlConnection& control, const Config& conf
     // that had swapped the keys could not produce this MAC.
     std::vector<std::uint8_t> expected_input =
         receiver_proof_input(config.username, target_username, session_keys.public_key,
-                             identity.keys.public_key, peer.session_key, peer.identity_key);
+                             identity.keys.public_key, peer.session_key, peer.identity_key,
+                             group_name);
 
     std::uint8_t expected_proof[kSha256Size];
     hmac_sha256(password_key.data(), password_key.size(), expected_input.data(),
@@ -347,7 +364,8 @@ Introduction request_introduction(ControlConnection& control, const Config& conf
 
 bool await_introduction(ControlConnection& control, const Config& config,
                         const Identity& identity, const X25519KeyPair& session_keys,
-                        const Key& password_key, TransportKind own_transport_hint,
+                        const Key& personal_password_key, const Key* group_password_key,
+                        const std::string& joined_group, TransportKind own_transport_hint,
                         KnownPeers& known_peers, std::uint32_t timeout_ms, Introduction& out) {
     std::uint64_t deadline =
         (timeout_ms == 0) ? 0 : (monotonic_millis() + timeout_ms);
@@ -385,11 +403,27 @@ bool await_introduction(ControlConnection& control, const Config& config,
 
         PeerIntroduction peer = PeerIntroduction::decode(frame.payload);
 
-        std::vector<std::uint8_t> sender_input = sender_proof_input(
-            peer.username, config.username, peer.session_key, peer.identity_key);
+        // Group sends name the group; personal sends leave it empty. Pick the
+        // matching stretched key so one accept session can take both.
+        const Key* password_key = &personal_password_key;
+        if (!peer.group_name.empty()) {
+            if (group_password_key == nullptr || peer.group_name != joined_group) {
+                log::warn("'" + peer.username + "' tried to send via group '" + peer.group_name +
+                          "', which this accept session has not joined");
+                std::this_thread::sleep_for(std::chrono::milliseconds(kWrongPasswordDelayMs));
+                static const std::string kReason = "not a member of that group";
+                control.stream().write_frame(MessageType::Reject, kReason.data(), kReason.size());
+                continue;
+            }
+            password_key = group_password_key;
+        }
+
+        std::vector<std::uint8_t> sender_input =
+            sender_proof_input(peer.username, config.username, peer.session_key, peer.identity_key,
+                               peer.group_name);
 
         std::uint8_t expected_proof[kSha256Size];
-        hmac_sha256(password_key.data(), password_key.size(), sender_input.data(),
+        hmac_sha256(password_key->data(), password_key->size(), sender_input.data(),
                     sender_input.size(), expected_proof);
 
         if (!constant_time_equal(peer.proof, expected_proof, kSha256Size)) {
@@ -423,13 +457,14 @@ bool await_introduction(ControlConnection& control, const Config& config,
         reply.pairing_id = peer.pairing_id;
         reply.transport_hint = (peer.transport_hint != TransportKind::None) ? peer.transport_hint
                                                                           : own_transport_hint;
+        reply.group_name = peer.group_name;
 
         std::vector<std::uint8_t> reply_input =
             receiver_proof_input(peer.username, config.username, peer.session_key,
                                  peer.identity_key, session_keys.public_key,
-                                 identity.keys.public_key);
+                                 identity.keys.public_key, peer.group_name);
 
-        hmac_sha256(password_key.data(), password_key.size(), reply_input.data(),
+        hmac_sha256(password_key->data(), password_key->size(), reply_input.data(),
                     reply_input.size(), reply.proof);
         ed25519_sign(identity.keys.secret, reply_input.data(), reply_input.size(), reply.signature);
 
@@ -447,6 +482,48 @@ bool await_introduction(ControlConnection& control, const Config& config,
         out.transport_hint = reply.transport_hint;
         out.keys = derive_session_keys(shared, transcript, false);
         return true;
+    }
+}
+
+GroupStatus query_group(ControlConnection& control, const std::string& name) {
+    GroupQuery query;
+    query.name = name;
+    try {
+        control.stream().write_frame(MessageType::GroupQuery, query.encode());
+        Frame frame;
+        control.stream().read_expected(MessageType::GroupStatus, frame);
+        return GroupStatus::decode(frame.payload);
+    } catch (const Error&) {
+        fail_user("this rendezvous server does not support groups");
+    }
+}
+
+GroupResult join_group(ControlConnection& control, const std::string& name,
+                       const Key& password_key) {
+    GroupJoin join;
+    join.name = name;
+    derive_group_verifier(password_key, name, join.verifier);
+
+    try {
+        control.stream().write_frame(MessageType::GroupJoin, join.encode());
+        Frame frame;
+        control.stream().read_expected(MessageType::GroupResult, frame);
+        return GroupResult::decode(frame.payload);
+    } catch (const Error&) {
+        fail_user("this rendezvous server does not support groups");
+    }
+}
+
+GroupRoster request_group_roster(ControlConnection& control, const std::string& name) {
+    GroupSendRequest request;
+    request.name = name;
+    try {
+        control.stream().write_frame(MessageType::GroupSendRequest, request.encode());
+        Frame frame;
+        control.stream().read_expected(MessageType::GroupRoster, frame);
+        return GroupRoster::decode(frame.payload);
+    } catch (const Error&) {
+        fail_user("this rendezvous server does not support groups");
     }
 }
 

@@ -191,7 +191,10 @@ bool punch_udp_path(int socket_fd, const std::vector<Endpoint>& raw_candidates,
             }
 
             // A probe. Answer it, and remember where from so later rounds keep
-            // answering until one of our answers gets through.
+            // answering until one of our answers gets through. Do not commit to
+            // the path yet: PROTOCOL.md requires a confirmed two-way punch, and
+            // treating inbound-only probes as success is what made campus Wi‑Fi
+            // pick flaky UDP instead of falling through to the relay.
             peer_seen = true;
             peer_address = from;
             std::memcpy(reply + kUdpHeaderSize, own_proof, kSha256Size);
@@ -201,16 +204,11 @@ bool punch_udp_path(int socket_fd, const std::vector<Endpoint>& raw_candidates,
     }
 
     if (peer_seen) {
-        // Probes arrived but none of our answers were confirmed. The inbound
-        // direction demonstrably works, which is enough to proceed: the reliable
-        // layer's own retransmission will establish whether the outbound one does.
-        chosen = peer_address;
         log::debug("UDP punch: heard from " + peer_address.to_string() +
-                   " without confirmation, trying it anyway");
-        return true;
+                   " but never got a PunchAck; not committing to a one-way path");
+    } else {
+        log::debug("UDP punch: no candidate answered");
     }
-
-    log::debug("UDP punch: no candidate answered");
     return false;
 }
 

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(drop-zone
-        VERSION 1.0.0
+        VERSION 1.1.0
         DESCRIPTION "Peer-to-peer terminal file transfer with a storage-free rendezvous server"
         LANGUAGES CXX)
 

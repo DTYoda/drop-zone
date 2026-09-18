@@ -19,6 +19,7 @@ namespace dz::client {
 KnownPeers::KnownPeers(std::string path) : path_(std::move(path)) {}
 
 void KnownPeers::load() {
+    std::lock_guard<std::mutex> guard(mutex_);
     peers_.clear();
 
     std::ifstream input(path_);
@@ -50,6 +51,7 @@ void KnownPeers::load() {
 }
 
 const KnownPeer* KnownPeers::find(const std::string& username) const {
+    std::lock_guard<std::mutex> guard(mutex_);
     for (const KnownPeer& peer : peers_) {
         if (peer.username == username) return &peer;
     }
@@ -58,7 +60,15 @@ const KnownPeer* KnownPeers::find(const std::string& username) const {
 
 PinResult KnownPeers::check(const std::string& username,
                             const std::uint8_t identity_key[kEd25519PublicKeySize]) const {
-    const KnownPeer* peer = find(username);
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    const KnownPeer* peer = nullptr;
+    for (const KnownPeer& candidate : peers_) {
+        if (candidate.username == username) {
+            peer = &candidate;
+            break;
+        }
+    }
     if (peer == nullptr) return PinResult::FirstSight;
 
     // Constant-time even though the recorded key is public: it costs nothing and
@@ -72,10 +82,12 @@ PinResult KnownPeers::check(const std::string& username,
 
 void KnownPeers::remember(const std::string& username,
                           const std::uint8_t identity_key[kEd25519PublicKeySize]) {
+    std::lock_guard<std::mutex> guard(mutex_);
+
     for (KnownPeer& peer : peers_) {
         if (peer.username == username) {
             std::memcpy(peer.identity_key, identity_key, kEd25519PublicKeySize);
-            save();
+            save_unlocked();
             return;
         }
     }
@@ -85,10 +97,10 @@ void KnownPeers::remember(const std::string& username,
     std::memcpy(peer.identity_key, identity_key, kEd25519PublicKeySize);
     peer.first_seen = static_cast<std::uint64_t>(std::time(nullptr));
     peers_.push_back(peer);
-    save();
+    save_unlocked();
 }
 
-void KnownPeers::save() const {
+void KnownPeers::save_unlocked() const {
     std::ostringstream out;
     out << "# drop-zone known peers.\n"
         << "# One line per peer: username, Ed25519 identity key, and when it was first\n"

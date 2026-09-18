@@ -1,7 +1,10 @@
 #include "dz/server/session_table.hpp"
 
+#include <cstring>
+
 #include "dz/crypto.hpp"
 #include "dz/protocol.hpp"
+#include "dz/secure.hpp"
 #include "dz/socket.hpp"
 
 namespace dz::server {
@@ -138,6 +141,120 @@ std::size_t SessionTable::claimed_usernames() const {
 std::size_t SessionTable::active_pairings() const {
     std::lock_guard<std::mutex> guard(mutex_);
     return pairings_.size();
+}
+
+bool SessionTable::prune_group_locked(Group& group) const {
+    auto it = group.members.begin();
+    while (it != group.members.end()) {
+        if (it->expired()) {
+            it = group.members.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return !group.members.empty();
+}
+
+bool SessionTable::group_exists(const std::string& name) const {
+    std::lock_guard<std::mutex> guard(mutex_);
+    auto existing = groups_.find(name);
+    if (existing == groups_.end()) return false;
+    if (!prune_group_locked(existing->second)) {
+        groups_.erase(existing);
+        return false;
+    }
+    return true;
+}
+
+std::size_t SessionTable::group_member_count(const std::string& name) const {
+    std::lock_guard<std::mutex> guard(mutex_);
+    auto existing = groups_.find(name);
+    if (existing == groups_.end()) return 0;
+    if (!prune_group_locked(existing->second)) {
+        groups_.erase(existing);
+        return 0;
+    }
+    return existing->second.members.size();
+}
+
+GroupJoinResult SessionTable::join_group(const std::string& name,
+                                         const std::uint8_t verifier[kSha256Size],
+                                         const ConnectionPtr& connection) {
+    if (!is_valid_username(name) || connection == nullptr) return GroupJoinResult::InvalidName;
+
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    auto existing = groups_.find(name);
+    if (existing != groups_.end() && !prune_group_locked(existing->second)) {
+        groups_.erase(existing);
+        existing = groups_.end();
+    }
+
+    if (existing == groups_.end()) {
+        Group group;
+        std::memcpy(group.verifier, verifier, kSha256Size);
+        group.members.push_back(connection);
+        groups_.emplace(name, std::move(group));
+        return GroupJoinResult::Created;
+    }
+
+    Group& group = existing->second;
+    for (const std::weak_ptr<Connection>& member : group.members) {
+        if (member.lock() == connection) return GroupJoinResult::AlreadyMember;
+    }
+
+    if (!constant_time_equal(group.verifier, verifier, kSha256Size)) {
+        return GroupJoinResult::WrongPassword;
+    }
+
+    if (group.members.size() >= kMaxGroupMembers) return GroupJoinResult::Full;
+
+    group.members.push_back(connection);
+    return GroupJoinResult::Joined;
+}
+
+void SessionTable::leave_group(const std::string& name, const Connection* connection) {
+    if (name.empty() || connection == nullptr) return;
+
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    auto existing = groups_.find(name);
+    if (existing == groups_.end()) return;
+
+    Group& group = existing->second;
+    auto it = group.members.begin();
+    while (it != group.members.end()) {
+        ConnectionPtr member = it->lock();
+        if (member == nullptr || member.get() == connection) {
+            it = group.members.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (group.members.empty()) groups_.erase(existing);
+}
+
+std::vector<ConnectionPtr> SessionTable::idle_group_members(
+    const std::string& name, const std::string& skip_username) const {
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    std::vector<ConnectionPtr> idle;
+    auto existing = groups_.find(name);
+    if (existing == groups_.end()) return idle;
+    if (!prune_group_locked(existing->second)) {
+        groups_.erase(existing);
+        return idle;
+    }
+
+    for (const std::weak_ptr<Connection>& member : existing->second.members) {
+        ConnectionPtr connection = member.lock();
+        if (connection == nullptr) continue;
+        if (connection->state != ConnectionState::ReceiverIdle) continue;
+        if (!skip_username.empty() && connection->claimed_username == skip_username) continue;
+        idle.push_back(std::move(connection));
+    }
+    return idle;
 }
 
 }  // namespace dz::server

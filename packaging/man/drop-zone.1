@@ -1,4 +1,4 @@
-.TH DROP-ZONE 1 "September 2026" "drop-zone 1.0.0" "User Commands"
+.TH DROP-ZONE 1 "September 2026" "drop-zone 1.1.0" "User Commands"
 .SH NAME
 drop-zone \- send files straight to another person's terminal
 .SH SYNOPSIS
@@ -39,7 +39,11 @@ is given or a default was set with
 .BR set-output .
 Uses the public password chosen at setup unless
 .B \-p
-is given.
+is given. With
+.B \-\-group = NAME
+also joins ephemeral group
+.IR NAME ,
+while remaining reachable under the personal username.
 .TP
 .B send
 .I FILE...
@@ -47,6 +51,12 @@ is given.
 .I USER
 Send files or directories to
 .IR USER .
+Alternatively,
+.B \-\-group = NAME
+sends to everybody currently accepting in
+.IR NAME
+(mutually exclusive with
+.BR \-t ).
 .TP
 .B whoami
 Print this machine's username and identity fingerprint.
@@ -81,10 +91,16 @@ Permanently change the rendezvous server written in
 .BR \-t ", " \-\-target = USER
 Username to send to.
 .TP
+.BR \-\-group = NAME
+Send to everybody currently accepting in ephemeral group
+.IR NAME .
+Mutually exclusive with
+.BR \-t .
+.TP
 .BR \-p ", " \-\-password = PASSWORD
 .IR USER 's
-public password. Omit it and drop-zone will ask, which keeps it out of the
-shell history.
+(or the group's) public password. Omit it and drop-zone will ask, which keeps
+it out of the shell history.
 .SS Accept options
 .TP
 .BR \-o ", " \-\-output = DIR
@@ -99,6 +115,13 @@ Accept every transfer without asking.
 .TP
 .B \-\-once
 Accept one transfer, then exit.
+.TP
+.BR \-\-group = NAME
+Also join ephemeral group
+.IR NAME .
+The first joiner's public password becomes the group password; later joiners
+are prompted for it. Membership lasts only while this accept session is
+connected.
 .SS Options for either mode
 .TP
 .B \-\-no\-encrypt

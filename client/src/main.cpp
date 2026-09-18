@@ -6,10 +6,14 @@
 
 #include <unistd.h>
 
+#include <atomic>
 #include <cstdio>
 #include <exception>
+#include <memory>
 #include <string>
+#include <thread>
 #include <utility>
+#include <vector>
 
 #include "dz/client/cli.hpp"
 #include "dz/client/config.hpp"
@@ -305,50 +309,21 @@ int command_set_public_password(const CommandLine& args) {
 // send
 // ---------------------------------------------------------------------------
 
-int command_send(const CommandLine& args) {
-    Config config = load_config(resolve_config_directory(args));
-
-    // Built before anything is unlocked or connected, so a typo in a filename
-    // fails immediately instead of after a password prompt and a round trip.
-    Manifest manifest = build_manifest(args.inputs);
-
-    if (!args.quiet) {
-        std::fprintf(stderr, "sending %s (%s across %zu file%s) to %s\n",
-                     manifest.display_name.c_str(), format_bytes(manifest.total_bytes).c_str(),
-                     manifest.files.size(), manifest.files.size() == 1 ? "" : "s",
-                     args.target.c_str());
-    }
-
-    SecretString private_password = read_password("Your private password: ");
-    Identity identity = unlock_identity(
-        config, std::string_view(private_password.data(), private_password.size()));
-
-    // Prompted rather than required on the command line, so it stays out of shell
-    // history and out of the process list.
-    SecretString public_password;
-    if (args.public_password.empty()) {
-        public_password = read_password(args.target + "'s public password: ");
-    } else {
-        public_password.assign(args.public_password.begin(), args.public_password.end());
-    }
-
-    KnownPeers known_peers(config.known_peers_path());
-    known_peers.load();
-
+/// One member of a group fan-out: its own control connection and sockets, so
+/// the transfers really run at once rather than queueing on one pairing.
+int send_to_one(const Config& config, const Identity& identity, const Manifest& manifest,
+                const CommandLine& args, KnownPeers& known_peers, const std::string& target,
+                std::string_view public_password, const std::string& group_name) {
     ControlConnection control(config, args.server_host, args.server_port);
     LocalSockets sockets = prepare_sockets(control.server_endpoint());
-
-    // A fresh key pair per transfer, so recovering one session's keys later reveals
-    // nothing about any other.
     X25519KeyPair session_keys = x25519_generate();
 
     control.say_hello(ClientRole::Sender, config.username, identity, session_keys.public_key,
                       sockets);
 
     Introduction introduction = request_introduction(
-        control, config, identity, session_keys, args.target,
-        std::string_view(public_password.data(), public_password.size()), args.force_transport,
-        known_peers);
+        control, config, identity, session_keys, target, public_password, args.force_transport,
+        known_peers, group_name);
 
     TransportRequest request;
     request.is_sender = true;
@@ -359,7 +334,7 @@ int command_send(const CommandLine& args) {
     request.pairing_id = introduction.pairing_id;
 
     ChannelPtr channel = establish_channel(sockets, request);
-    log::info(std::string("connected: ") + channel->describe());
+    log::info(std::string("connected to ") + target + ": " + channel->describe());
 
     SendOptions options;
     options.encrypt = args.encrypt_set ? args.encrypt : config.encrypt_by_default;
@@ -373,8 +348,112 @@ int command_send(const CommandLine& args) {
     control.say_goodbye();
 
     if (!args.quiet && !result.output_directory.empty()) {
-        std::fprintf(stderr, "saved on %s in %s\n", args.target.c_str(),
+        std::fprintf(stderr, "saved on %s in %s\n", target.c_str(),
                      result.output_directory.c_str());
+    }
+    return 0;
+}
+
+int command_send(const CommandLine& args) {
+    Config config = load_config(resolve_config_directory(args));
+
+    // Built before anything is unlocked or connected, so a typo in a filename
+    // fails immediately instead of after a password prompt and a round trip.
+    Manifest manifest = build_manifest(args.inputs);
+
+    const bool group_send = !args.group.empty();
+    if (!args.quiet) {
+        if (group_send) {
+            std::fprintf(stderr, "sending %s (%s across %zu file%s) to group %s\n",
+                         manifest.display_name.c_str(), format_bytes(manifest.total_bytes).c_str(),
+                         manifest.files.size(), manifest.files.size() == 1 ? "" : "s",
+                         args.group.c_str());
+        } else {
+            std::fprintf(stderr, "sending %s (%s across %zu file%s) to %s\n",
+                         manifest.display_name.c_str(), format_bytes(manifest.total_bytes).c_str(),
+                         manifest.files.size(), manifest.files.size() == 1 ? "" : "s",
+                         args.target.c_str());
+        }
+    }
+
+    SecretString private_password = read_password("Your private password: ");
+    Identity identity = unlock_identity(
+        config, std::string_view(private_password.data(), private_password.size()));
+
+    // Prompted rather than required on the command line, so it stays out of shell
+    // history and out of the process list.
+    SecretString public_password;
+    if (args.public_password.empty()) {
+        std::string prompt = group_send ? (args.group + "'s group password: ")
+                                        : (args.target + "'s public password: ");
+        public_password = read_password(prompt);
+    } else {
+        public_password.assign(args.public_password.begin(), args.public_password.end());
+    }
+
+    KnownPeers known_peers(config.known_peers_path());
+    known_peers.load();
+
+    if (!group_send) {
+        return send_to_one(config, identity, manifest, args, known_peers, args.target,
+                           std::string_view(public_password.data(), public_password.size()),
+                           /*group_name=*/"");
+    }
+
+    // Fetch the current idle roster on a short-lived sender connection, then
+    // fan out one full 1:1 transfer per member in parallel.
+    std::vector<std::string> roster;
+    {
+        ControlConnection control(config, args.server_host, args.server_port);
+        LocalSockets sockets = prepare_sockets(control.server_endpoint());
+        X25519KeyPair session_keys = x25519_generate();
+        control.say_hello(ClientRole::Sender, config.username, identity, session_keys.public_key,
+                          sockets);
+        GroupRoster members = request_group_roster(control, args.group);
+        roster = std::move(members.usernames);
+        control.say_goodbye();
+    }
+
+    if (roster.empty()) {
+        fail_user("nobody in group '" + args.group + "' is accepting files right now");
+    }
+
+    if (!args.quiet) {
+        std::fprintf(stderr, "group %s has %zu member%s accepting:\n", args.group.c_str(),
+                     roster.size(), roster.size() == 1 ? "" : "s");
+        for (const std::string& member : roster) {
+            std::fprintf(stderr, "  %s\n", member.c_str());
+        }
+    }
+
+    std::vector<std::thread> workers;
+    std::vector<std::string> errors(roster.size());
+    std::atomic<std::size_t> failures{0};
+
+    workers.reserve(roster.size());
+    for (std::size_t i = 0; i < roster.size(); ++i) {
+        workers.emplace_back([&, i]() {
+            try {
+                send_to_one(config, identity, manifest, args, known_peers, roster[i],
+                            std::string_view(public_password.data(), public_password.size()),
+                            args.group);
+            } catch (const std::exception& error) {
+                errors[i] = error.what();
+                failures.fetch_add(1);
+            }
+        });
+    }
+
+    for (std::thread& worker : workers) worker.join();
+
+    for (std::size_t i = 0; i < roster.size(); ++i) {
+        if (errors[i].empty()) continue;
+        std::fprintf(stderr, "failed for %s: %s\n", roster[i].c_str(), errors[i].c_str());
+    }
+
+    if (failures.load() != 0) {
+        fail_user("group send finished with " + std::to_string(failures.load()) + " failure" +
+                  (failures.load() == 1 ? "" : "s") + " out of " + std::to_string(roster.size()));
     }
     return 0;
 }
@@ -406,7 +485,7 @@ int command_accept(const CommandLine& args) {
     // Stretched once here, not per incoming request. scrypt takes about a tenth of
     // a second, so doing it per request would let anybody pin this machine's CPU
     // just by asking to send repeatedly.
-    Key password_key = derive_public_password_key(
+    Key personal_password_key = derive_public_password_key(
         std::string_view(public_password.data(), public_password.size()), config.username);
 
     std::string output_directory = args.output_directory.empty()
@@ -418,76 +497,132 @@ int command_accept(const CommandLine& args) {
     KnownPeers known_peers(config.known_peers_path());
     known_peers.load();
 
-    ControlConnection control(config, args.server_host, args.server_port);
-
     if (!args.quiet) {
         std::fprintf(stderr, "accepting as %s, saving into %s\n", config.username.c_str(),
                      output_directory.c_str());
         std::fprintf(stderr, "fingerprint %s\n", identity.fingerprint().c_str());
     }
 
-    bool announced = false;
+    // The group password key is derived on the first successful join and reused
+    // after a relay forces a reconnect.
+    std::unique_ptr<Key> group_password_key;
+    SecretString cached_group_password;
+    bool group_password_known = false;
 
     for (;;) {
-        // Fresh sockets and a fresh ephemeral key for each transfer: the previous
-        // transfer consumed the UDP socket if it used the punched path, and a new
-        // key pair keeps sessions independent of each other.
-        LocalSockets sockets = prepare_sockets(control.server_endpoint());
-        X25519KeyPair session_keys = x25519_generate();
+        ControlConnection control(config, args.server_host, args.server_port);
+        bool announced = false;
+        bool need_reconnect = false;
 
-        ServerHello hello = control.say_hello(ClientRole::Receiver, config.username, identity,
-                                              session_keys.public_key, sockets);
-        if (!announced) {
-            if (!args.quiet) std::fprintf(stderr, "%s\n", hello.message.c_str());
-            announced = true;
-        }
+        for (;;) {
+            // Fresh sockets and a fresh ephemeral key for each transfer: the previous
+            // transfer consumed the UDP socket if it used the punched path, and a new
+            // key pair keeps sessions independent of each other.
+            LocalSockets sockets = prepare_sockets(control.server_endpoint());
+            X25519KeyPair session_keys = x25519_generate();
 
-        Introduction introduction;
-        if (!await_introduction(control, config, identity, session_keys, password_key,
-                                args.force_transport, known_peers, /*timeout_ms=*/0,
-                                introduction)) {
+            ServerHello hello = control.say_hello(ClientRole::Receiver, config.username, identity,
+                                                  session_keys.public_key, sockets);
+            if (!announced) {
+                if (!args.quiet) std::fprintf(stderr, "%s\n", hello.message.c_str());
+
+                if (!args.group.empty()) {
+                    if (!group_password_known) {
+                        GroupStatus status = query_group(control, args.group);
+                        if (!status.exists) {
+                            cached_group_password = public_password;
+                            if (!args.quiet) {
+                                std::fprintf(stderr,
+                                             "creating group %s; its password is your public "
+                                             "password\n",
+                                             args.group.c_str());
+                            }
+                        } else {
+                            cached_group_password =
+                                read_password("Group " + args.group + "'s password: ");
+                        }
+                        group_password_key = std::make_unique<Key>(derive_public_password_key(
+                            std::string_view(cached_group_password.data(),
+                                             cached_group_password.size()),
+                            args.group));
+                        group_password_known = true;
+                    }
+
+                    GroupResult result = join_group(control, args.group, *group_password_key);
+                    switch (result.outcome) {
+                        case GroupJoinOutcome::Created:
+                        case GroupJoinOutcome::Joined:
+                        case GroupJoinOutcome::AlreadyMember:
+                            if (!args.quiet) {
+                                std::fprintf(stderr, "%s (%u member%s)\n", result.message.c_str(),
+                                             result.member_count,
+                                             result.member_count == 1 ? "" : "s");
+                            }
+                            break;
+                        case GroupJoinOutcome::WrongPassword:
+                            fail_user("wrong password for group '" + args.group + "'");
+                        case GroupJoinOutcome::Full:
+                            fail_user("group '" + args.group + "' is full");
+                        case GroupJoinOutcome::InvalidName:
+                            fail_user("'" + args.group + "' is not a usable group name");
+                    }
+                }
+
+                announced = true;
+            }
+
+            Introduction introduction;
+            if (!await_introduction(control, config, identity, session_keys, personal_password_key,
+                                    group_password_key.get(), args.group, args.force_transport,
+                                    known_peers, /*timeout_ms=*/0, introduction)) {
+                break;
+            }
+
+            TransportRequest request;
+            request.is_sender = false;
+            request.peer_candidates = introduction.peer_candidates;
+            request.handshake_key = introduction.keys.handshake_key;
+            request.forced = introduction.transport_hint;
+            request.control = &control.stream();
+            request.pairing_id = introduction.pairing_id;
+
+            ChannelPtr channel = establish_channel(sockets, request);
+            log::info(std::string("connected: ") + channel->describe());
+
+            ReceiveOptions options;
+            options.output_directory = output_directory;
+            options.prompt = !args.assume_yes && config.prompt_before_accepting;
+            options.verify_digests = args.verify_set ? args.verify : config.verify_digests;
+            options.quiet = args.quiet;
+
+            ReceiveResult result = receive_transfer(*channel, introduction.keys,
+                                                    introduction.peer_username, options);
+
+            channel->close_gracefully();
+
+            if (!result.accepted && !args.quiet) {
+                std::fprintf(stderr, "declined the transfer from %s\n",
+                             introduction.peer_username.c_str());
+            }
+
+            if (args.once) {
+                control.say_goodbye();
+                return 0;
+            }
+
+            // Always reconnect after a transfer. The relay tier consumes the
+            // control connection; a direct TCP/UDP transfer leaves the pairing
+            // live on the server until the sender hangs up, which used to inject
+            // a RelayClose that the next say_hello then misread as a protocol
+            // error. A fresh control connection avoids both.
+            log::info("reconnect after transfer (" + std::string(channel->describe()) + ")");
+            need_reconnect = true;
             break;
         }
 
-        TransportRequest request;
-        request.is_sender = false;
-        request.peer_candidates = introduction.peer_candidates;
-        request.handshake_key = introduction.keys.handshake_key;
-        request.forced = introduction.transport_hint;
-        request.control = &control.stream();
-        request.pairing_id = introduction.pairing_id;
-
-        ChannelPtr channel = establish_channel(sockets, request);
-        log::info(std::string("connected: ") + channel->describe());
-
-        ReceiveOptions options;
-        options.output_directory = output_directory;
-        options.prompt = !args.assume_yes && config.prompt_before_accepting;
-        options.verify_digests = args.verify_set ? args.verify : config.verify_digests;
-        options.quiet = args.quiet;
-
-        ReceiveResult result = receive_transfer(*channel, introduction.keys,
-                                                introduction.peer_username, options);
-
-        channel->close_gracefully();
-
-        if (!result.accepted && !args.quiet) {
-            std::fprintf(stderr, "declined the transfer from %s\n",
-                         introduction.peer_username.c_str());
-        }
-
-        if (args.once) break;
-
-        // The relay tier tunnels through the control connection, so once a transfer
-        // has used it that connection is no longer usable for anything else.
-        if (channel->kind() == TransportKind::ServerRelay) {
-            log::info("that transfer used the relay, so reconnecting");
-            break;
-        }
+        control.say_goodbye();
+        if (!need_reconnect) return 0;
     }
-
-    control.say_goodbye();
-    return 0;
 }
 
 int run(int argc, char* argv[]) {

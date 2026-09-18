@@ -6,7 +6,8 @@ add_executable(dz_tests
     test_crypto.cpp
     test_manifest.cpp
     test_keystore.cpp
-    test_reliable_udp.cpp)
+    test_reliable_udp.cpp
+    test_session_table.cpp)
 
 target_link_libraries(dz_tests PRIVATE dz_client_core dz_server_core)
 

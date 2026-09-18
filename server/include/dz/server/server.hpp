@@ -128,6 +128,9 @@ private:
     void handle_frame(Shard& shard, const ConnectionPtr& connection, const Frame& frame);
     void handle_client_hello(const ConnectionPtr& connection, const Frame& frame);
     void handle_send_request(const ConnectionPtr& connection, const Frame& frame);
+    void handle_group_query(const ConnectionPtr& connection, const Frame& frame);
+    void handle_group_join(const ConnectionPtr& connection, const Frame& frame);
+    void handle_group_send_request(const ConnectionPtr& connection, const Frame& frame);
     void handle_accept(const ConnectionPtr& connection, const Frame& frame);
     void handle_reject(const ConnectionPtr& connection, const Frame& frame);
     void handle_relay_open(const ConnectionPtr& connection, const Frame& frame);

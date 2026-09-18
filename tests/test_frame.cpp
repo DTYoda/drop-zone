@@ -215,6 +215,81 @@ DZ_TEST(chunk_headers_round_trip) {
     DZ_CHECK_EQUAL(decoded.counter, header.counter);
 }
 
+DZ_TEST(a_personal_send_request_round_trips_without_a_group_field) {
+    SendRequest request;
+    request.target_username = "bob";
+    request.transport_hint = TransportKind::DirectTcp;
+    for (std::size_t i = 0; i < kSha256Size; ++i) request.proof[i] = static_cast<std::uint8_t>(i);
+    for (std::size_t i = 0; i < kEd25519SignatureSize; ++i) {
+        request.signature[i] = static_cast<std::uint8_t>(0xff - i);
+    }
+
+    SendRequest decoded = SendRequest::decode(request.encode());
+    DZ_CHECK_EQUAL(decoded.target_username, std::string("bob"));
+    DZ_CHECK(decoded.group_name.empty());
+    DZ_CHECK(decoded.transport_hint == TransportKind::DirectTcp);
+    DZ_CHECK_EQUAL(decoded.proof[3], 3);
+}
+
+DZ_TEST(a_group_send_request_carries_the_group_name) {
+    SendRequest request;
+    request.target_username = "bob";
+    request.group_name = "friends";
+    request.transport_hint = TransportKind::None;
+    for (std::size_t i = 0; i < kSha256Size; ++i) request.proof[i] = 1;
+    for (std::size_t i = 0; i < kEd25519SignatureSize; ++i) request.signature[i] = 2;
+
+    SendRequest decoded = SendRequest::decode(request.encode());
+    DZ_CHECK_EQUAL(decoded.target_username, std::string("bob"));
+    DZ_CHECK_EQUAL(decoded.group_name, std::string("friends"));
+
+    PeerIntroduction intro;
+    intro.username = "alice";
+    intro.group_name = "friends";
+    intro.pairing_id = 99;
+    intro.transport_hint = TransportKind::HolePunchUdp;
+
+    PeerIntroduction decoded_intro = PeerIntroduction::decode(intro.encode());
+    DZ_CHECK_EQUAL(decoded_intro.username, std::string("alice"));
+    DZ_CHECK_EQUAL(decoded_intro.group_name, std::string("friends"));
+    DZ_CHECK_EQUAL(decoded_intro.pairing_id, 99u);
+}
+
+DZ_TEST(group_control_messages_round_trip) {
+    GroupQuery query;
+    query.name = "friends";
+    DZ_CHECK_EQUAL(GroupQuery::decode(query.encode()).name, std::string("friends"));
+
+    GroupStatus status;
+    status.exists = true;
+    status.member_count = 3;
+    GroupStatus decoded_status = GroupStatus::decode(status.encode());
+    DZ_CHECK(decoded_status.exists);
+    DZ_CHECK_EQUAL(decoded_status.member_count, 3u);
+
+    GroupJoin join;
+    join.name = "friends";
+    for (std::size_t i = 0; i < kSha256Size; ++i) join.verifier[i] = static_cast<std::uint8_t>(i);
+    GroupJoin decoded_join = GroupJoin::decode(join.encode());
+    DZ_CHECK_EQUAL(decoded_join.name, std::string("friends"));
+    DZ_CHECK_EQUAL(decoded_join.verifier[7], 7);
+
+    GroupResult result;
+    result.outcome = GroupJoinOutcome::Created;
+    result.message = "created group friends";
+    result.member_count = 1;
+    GroupResult decoded_result = GroupResult::decode(result.encode());
+    DZ_CHECK(decoded_result.outcome == GroupJoinOutcome::Created);
+    DZ_CHECK_EQUAL(decoded_result.message, std::string("created group friends"));
+    DZ_CHECK_EQUAL(decoded_result.member_count, 1u);
+
+    GroupRoster roster;
+    roster.usernames = {"alice", "bob"};
+    GroupRoster decoded_roster = GroupRoster::decode(roster.encode());
+    DZ_CHECK_EQUAL(decoded_roster.usernames.size(), 2u);
+    DZ_CHECK_EQUAL(decoded_roster.usernames[1], std::string("bob"));
+}
+
 DZ_TEST(control_messages_round_trip) {
     ClientHello hello;
     hello.role = ClientRole::Receiver;

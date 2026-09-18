@@ -76,6 +76,10 @@ public:
     /// as `state`: the sender's shard stamps the id onto the receiver.
     std::atomic<std::uint64_t> pairing_id{0};
 
+    /// Ephemeral group this receiver has joined, empty if none. Survives a
+    /// ClientHello refresh between transfers; cleared when the socket closes.
+    std::string joined_group;
+
     /// Record that this connection forwards to `peer`. Must be called on both
     /// sides before either is marked Relaying, so a RelayData that observes
     /// Relaying is guaranteed to find a peer rather than closing the connection.

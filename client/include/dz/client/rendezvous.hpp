@@ -105,7 +105,8 @@ private:
 };
 
 /// The sender's side of the handshake: ask to be introduced to `target`, prove
-/// knowledge of its public password, and check what comes back.
+/// knowledge of its public password (or the group's, when `group_name` is set),
+/// and check what comes back.
 ///
 /// Throws a UserError when the target is not accepting, declines, or fails to
 /// prove it knows its own password -- which is what a server trying to impersonate
@@ -114,17 +115,32 @@ Introduction request_introduction(ControlConnection& control, const Config& conf
                                   const Identity& identity, const X25519KeyPair& session_keys,
                                   const std::string& target_username,
                                   std::string_view public_password, TransportKind transport_hint,
-                                  KnownPeers& known_peers);
+                                  KnownPeers& known_peers, const std::string& group_name = {});
 
 /// The receiver's side: wait for a sender, check its proof, and answer with this
 /// peer's own half.
+///
+/// `personal_password_key` authenticates personal sends. When `joined_group` is
+/// non-empty, `group_password_key` must be the stretched group password and is
+/// used for Incoming frames that name that group.
 ///
 /// `timeout_ms` of 0 waits indefinitely, which is what accept mode does.
 /// Returns false on timeout.
 bool await_introduction(ControlConnection& control, const Config& config,
                         const Identity& identity, const X25519KeyPair& session_keys,
-                        const Key& public_password_key, TransportKind own_transport_hint,
+                        const Key& personal_password_key, const Key* group_password_key,
+                        const std::string& joined_group, TransportKind own_transport_hint,
                         KnownPeers& known_peers, std::uint32_t timeout_ms, Introduction& out);
+
+/// Ask the server whether `name` currently has members.
+GroupStatus query_group(ControlConnection& control, const std::string& name);
+
+/// Create or join `name` with a verifier derived from `password_key`.
+GroupResult join_group(ControlConnection& control, const std::string& name,
+                       const Key& password_key);
+
+/// Ask the server for the idle members of `name`.
+GroupRoster request_group_roster(ControlConnection& control, const std::string& name);
 
 /// Report a pinning result to the user, and decide whether to continue.
 ///

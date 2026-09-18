@@ -53,6 +53,13 @@ enum class MessageType : std::uint8_t {
     KeepAlive = 11,    ///< Holds the control connection and its NAT mapping open.
     Bye = 12,          ///< Orderly shutdown of a control connection.
 
+    GroupQuery = 13,       ///< Does this ephemeral group currently exist?
+    GroupStatus = 14,      ///< Answer: exists, and how many members.
+    GroupJoin = 15,        ///< Receiver creates or joins a group with a verifier.
+    GroupResult = 16,      ///< Created, joined, or why not.
+    GroupSendRequest = 17, ///< Sender asks for the current idle members.
+    GroupRoster = 18,      ///< Usernames of members currently accepting.
+
     // -- Data plane: peer to peer over whichever transport won --------------
     Offer = 32,        ///< Sealed manifest: what the sender wants to send.
     Decision = 33,     ///< Receiver's accept or reject of that manifest.

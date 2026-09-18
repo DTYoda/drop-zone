@@ -24,6 +24,12 @@ Key derive_public_password_key(std::string_view password, std::string_view recei
     return key;
 }
 
+void derive_group_verifier(const Key& password_key, std::string_view group_name,
+                           std::uint8_t out[kSha256Size]) {
+    std::string input = std::string(kMacContextGroupVerifier) + "/" + std::string(group_name);
+    hmac_sha256(password_key.data(), password_key.size(), input.data(), input.size(), out);
+}
+
 // ---------------------------------------------------------------------------
 // Transport naming
 // ---------------------------------------------------------------------------
@@ -117,6 +123,7 @@ std::vector<std::uint8_t> SendRequest::encode() const {
     writer.put_bytes(proof, sizeof(proof));
     writer.put_bytes(signature, sizeof(signature));
     writer.put_u8(static_cast<std::uint8_t>(transport_hint));
+    if (!group_name.empty()) writer.put_string(group_name);
     return writer.take();
 }
 
@@ -136,6 +143,12 @@ SendRequest SendRequest::decode(const std::vector<std::uint8_t>& payload) {
         fail("SendRequest names an unknown transport");
     }
     request.transport_hint = static_cast<TransportKind>(hint);
+    if (!reader.empty()) {
+        request.group_name = reader.take_string();
+        if (!request.group_name.empty() && !is_valid_username(request.group_name)) {
+            fail("SendRequest names an invalid group");
+        }
+    }
     return request;
 }
 
@@ -153,6 +166,7 @@ std::vector<std::uint8_t> PeerIntroduction::encode() const {
     writer.put_bytes(signature, sizeof(signature));
     writer.put_u64(pairing_id);
     writer.put_u8(static_cast<std::uint8_t>(transport_hint));
+    if (!group_name.empty()) writer.put_string(group_name);
     return writer.take();
 }
 
@@ -176,7 +190,128 @@ PeerIntroduction PeerIntroduction::decode(const std::vector<std::uint8_t>& paylo
         fail("peer introduction names an unknown transport");
     }
     introduction.transport_hint = static_cast<TransportKind>(hint);
+    if (!reader.empty()) {
+        introduction.group_name = reader.take_string();
+        if (!introduction.group_name.empty() && !is_valid_username(introduction.group_name)) {
+            fail("peer introduction names an invalid group");
+        }
+    }
     return introduction;
+}
+
+// ---------------------------------------------------------------------------
+// Groups
+// ---------------------------------------------------------------------------
+
+namespace {
+
+void require_group_name(const std::string& name, const char* what) {
+    if (!is_valid_username(name)) {
+        fail(std::string(what) + " names an invalid group");
+    }
+}
+
+}  // namespace
+
+std::vector<std::uint8_t> GroupQuery::encode() const {
+    PayloadWriter writer;
+    writer.put_string(name);
+    return writer.take();
+}
+
+GroupQuery GroupQuery::decode(const std::vector<std::uint8_t>& payload) {
+    PayloadReader reader(payload);
+    GroupQuery query;
+    query.name = reader.take_string();
+    require_group_name(query.name, "GroupQuery");
+    return query;
+}
+
+std::vector<std::uint8_t> GroupStatus::encode() const {
+    PayloadWriter writer;
+    writer.put_bool(exists);
+    writer.put_u32(member_count);
+    return writer.take();
+}
+
+GroupStatus GroupStatus::decode(const std::vector<std::uint8_t>& payload) {
+    PayloadReader reader(payload);
+    GroupStatus status;
+    status.exists = reader.take_bool();
+    status.member_count = reader.take_u32();
+    return status;
+}
+
+std::vector<std::uint8_t> GroupJoin::encode() const {
+    PayloadWriter writer;
+    writer.put_string(name);
+    writer.put_bytes(verifier, sizeof(verifier));
+    return writer.take();
+}
+
+GroupJoin GroupJoin::decode(const std::vector<std::uint8_t>& payload) {
+    PayloadReader reader(payload);
+    GroupJoin join;
+    join.name = reader.take_string();
+    require_group_name(join.name, "GroupJoin");
+    reader.take_fixed(join.verifier, sizeof(join.verifier));
+    return join;
+}
+
+std::vector<std::uint8_t> GroupResult::encode() const {
+    PayloadWriter writer;
+    writer.put_u8(static_cast<std::uint8_t>(outcome));
+    writer.put_string(message);
+    writer.put_u32(member_count);
+    return writer.take();
+}
+
+GroupResult GroupResult::decode(const std::vector<std::uint8_t>& payload) {
+    PayloadReader reader(payload);
+    GroupResult result;
+    std::uint8_t outcome = reader.take_u8();
+    if (outcome < 1 || outcome > 6) fail("GroupResult carries an unknown outcome");
+    result.outcome = static_cast<GroupJoinOutcome>(outcome);
+    result.message = reader.take_string();
+    result.member_count = reader.take_u32();
+    return result;
+}
+
+std::vector<std::uint8_t> GroupSendRequest::encode() const {
+    PayloadWriter writer;
+    writer.put_string(name);
+    return writer.take();
+}
+
+GroupSendRequest GroupSendRequest::decode(const std::vector<std::uint8_t>& payload) {
+    PayloadReader reader(payload);
+    GroupSendRequest request;
+    request.name = reader.take_string();
+    require_group_name(request.name, "GroupSendRequest");
+    return request;
+}
+
+std::vector<std::uint8_t> GroupRoster::encode() const {
+    PayloadWriter writer;
+    writer.put_u16(static_cast<std::uint16_t>(usernames.size()));
+    for (const std::string& username : usernames) writer.put_string(username);
+    return writer.take();
+}
+
+GroupRoster GroupRoster::decode(const std::vector<std::uint8_t>& payload) {
+    PayloadReader reader(payload);
+    GroupRoster roster;
+    std::uint16_t count = reader.take_u16();
+    if (count > kMaxGroupMembers) {
+        fail("GroupRoster lists more members than the protocol allows");
+    }
+    roster.usernames.reserve(count);
+    for (std::uint16_t i = 0; i < count; ++i) {
+        std::string username = reader.take_string();
+        if (!is_valid_username(username)) fail("GroupRoster names an invalid username");
+        roster.usernames.push_back(std::move(username));
+    }
+    return roster;
 }
 
 // ---------------------------------------------------------------------------
