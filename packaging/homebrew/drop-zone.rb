@@ -47,6 +47,9 @@ class DropZone < Formula
   def caveats
     <<~EOS
       Run `drop-zone setup` once to create a username and identity.
+
+      Ephemeral groups (1.1+): `drop-zone accept --group=NAME` and
+      `drop-zone send FILE --group=NAME`.
     EOS
   end
 
@@ -57,6 +60,7 @@ class DropZone < Formula
     help = shell_output("#{bin}/drop-zone --help")
     assert_match "drop-zone setup", help
     assert_match "send FILE", help
+    assert_match "--group=NAME", help
     assert_match "set-server", help
     assert_match "set-output", help
     assert_match "set-public-password", help

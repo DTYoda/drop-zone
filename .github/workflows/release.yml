@@ -47,11 +47,20 @@ jobs:
         run: |
           notes="$(mktemp)"
           cat > "$notes" <<EOF
+          ## Highlights
+
+          - Ephemeral groups: \`accept --group=NAME\` / \`send FILE --group=NAME\`
+          - More reliable fallback to the server relay on restricted networks
+            (campus Wi‑Fi), so \`--force-transport=relay\` is no longer required
+
           ## Install
 
           \`\`\`sh
           brew install DTYoda/tap/drop-zone
           \`\`\`
+
+          Or build from the source archive below with
+          \`-DDZ_BUILD_SERVER=OFF\`.
 
           ## Source archive for packagers
 
