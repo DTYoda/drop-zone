@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">drop-zone</title>
+  <desc id="desc">Send files peer to peer through an untrusted rendezvous switchboard.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a101c"/>
+      <stop offset="55%" stop-color="#10182a"/>
+      <stop offset="100%" stop-color="#162032"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#5ec4b4" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#5ec4b4" stop-opacity="0"/>
+    </linearGradient>
+    <marker id="arrT" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5ec4b4"/>
+    </marker>
+    <marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#f0a060"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="420" rx="20" fill="url(#bg)"/>
+  <ellipse cx="900" cy="210" rx="280" ry="160" fill="url(#glow)"/>
+
+  <text x="64" y="120" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="56" font-weight="750" fill="#f4f1ea" letter-spacing="-1">drop-zone</text>
+  <text x="64" y="168" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="22" fill="#9aa6bc">Send files peer to peer</text>
+  <text x="64" y="208" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="16" fill="#6b778c">Untrusted rendezvous · end-to-end AEAD · TCP / UDP / relay</text>
+
+  <g transform="translate(64, 260)">
+    <rect x="0" y="0" width="150" height="36" rx="18" fill="#1a2740" stroke="#3d8f7a"/>
+    <text x="75" y="23" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="600" fill="#5ec4b4">C++20 client</text>
+    <rect x="166" y="0" width="170" height="36" rx="18" fill="#1a2740" stroke="#4a6fa5"/>
+    <text x="251" y="23" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="600" fill="#7eb0e0">Homebrew install</text>
+    <rect x="352" y="0" width="180" height="36" rx="18" fill="#2a2118" stroke="#c07840"/>
+    <text x="442" y="23" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="600" fill="#f0a060">Zero server storage</text>
+  </g>
+
+  <!-- Right-side mini diagram -->
+  <rect x="720" y="100" width="160" height="90" rx="12" fill="#121a2b" stroke="#3d5a80"/>
+  <text x="800" y="140" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700" fill="#e8eef7">Sender</text>
+  <text x="800" y="162" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="#8b95a8">send -t bob</text>
+
+  <rect x="980" y="100" width="160" height="90" rx="12" fill="#121a2b" stroke="#3d5a80"/>
+  <text x="1060" y="140" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700" fill="#e8eef7">Receiver</text>
+  <text x="1060" y="162" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="#8b95a8">accept</text>
+
+  <rect x="820" y="250" width="220" height="70" rx="12" fill="#1a1510" stroke="#c07840"/>
+  <text x="930" y="280" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700" fill="#f0a060">Rendezvous</text>
+  <text x="930" y="300" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#8a7a68">switchboard only</text>
+
+  <path d="M800 190 C800 220, 860 240, 900 250" fill="none" stroke="#f0a060" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrA)"/>
+  <path d="M1060 190 C1060 220, 1000 240, 960 250" fill="none" stroke="#f0a060" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrA)"/>
+  <path d="M880 145 C920 130, 980 130, 980 145" fill="none" stroke="#5ec4b4" stroke-width="3" marker-end="url(#arrT)"/>
+  <text x="930" y="128" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#5ec4b4">peer-to-peer</text>
+</svg>
