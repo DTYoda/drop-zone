@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">drop-zone architecture</title>
+  <desc id="desc">Two peers connect through a rendezvous server for introduction, then transfer files peer-to-peer over TCP, UDP, or ciphertext relay.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0c1220"/>
+      <stop offset="100%" stop-color="#151d2e"/>
+    </linearGradient>
+    <linearGradient id="peerFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2740"/>
+      <stop offset="100%" stop-color="#121a2b"/>
+    </linearGradient>
+    <linearGradient id="serverFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a2118"/>
+      <stop offset="100%" stop-color="#1a1510"/>
+    </linearGradient>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f0a060"/>
+    </marker>
+    <marker id="arrowTeal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5ec4b4"/>
+    </marker>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="960" height="420" rx="16" fill="url(#bg)"/>
+  <text x="40" y="42" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="20" font-weight="700" fill="#f4f1ea">How drop-zone moves a file</text>
+  <text x="40" y="66" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" fill="#8b95a8">Rendezvous introduces peers. Bytes travel on the best path the two machines can open.</text>
+
+  <!-- Sender -->
+  <g filter="url(#soft)">
+    <rect x="48" y="120" width="200" height="180" rx="14" fill="url(#peerFill)" stroke="#3d5a80" stroke-width="1.5"/>
+  </g>
+  <circle cx="148" cy="168" r="22" fill="#243656" stroke="#5ec4b4" stroke-width="2"/>
+  <text x="148" y="174" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#5ec4b4">‘</text>
+  <text x="148" y="214" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#e8eef7">Sender</text>
+  <text x="148" y="238" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#8b95a8">drop-zone send</text>
+  <text x="148" y="258" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#8b95a8">report.pdf -t bob</text>
+
+  <!-- Receiver -->
+  <g filter="url(#soft)">
+    <rect x="712" y="120" width="200" height="180" rx="14" fill="url(#peerFill)" stroke="#3d5a80" stroke-width="1.5"/>
+  </g>
+  <circle cx="812" cy="168" r="22" fill="#243656" stroke="#5ec4b4" stroke-width="2"/>
+  <text x="812" y="174" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#5ec4b4">“</text>
+  <text x="812" y="214" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" fill="#e8eef7">Receiver</text>
+  <text x="812" y="238" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#8b95a8">drop-zone accept</text>
+  <text x="812" y="258" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#8b95a8">waiting as bob</text>
+
+  <!-- Server -->
+  <g filter="url(#soft)">
+    <rect x="360" y="100" width="240" height="120" rx="14" fill="url(#serverFill)" stroke="#c07840" stroke-width="1.5"/>
+  </g>
+  <text x="480" y="138" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#f0a060">Rendezvous server</text>
+  <text x="480" y="162" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#c4a882">Switchboard only</text>
+  <text x="480" y="182" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#8a7a68">No passwords · no filenames · no file bytes</text>
+  <text x="480" y="200" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#8a7a68">No disk storage</text>
+
+  <!-- Intro lines -->
+  <path d="M248 160 C300 140, 330 140, 360 145" fill="none" stroke="#f0a060" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowAmber)"/>
+  <path d="M600 145 C640 140, 680 140, 712 160" fill="none" stroke="#f0a060" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowAmber)"/>
+  <text x="480" y="92" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#f0a060">1. introduce (keys + candidates)</text>
+
+  <!-- Direct path -->
+  <path d="M248 260 C400 340, 560 340, 712 260" fill="none" stroke="#5ec4b4" stroke-width="3" marker-end="url(#arrowTeal)"/>
+  <rect x="390" y="318" width="180" height="28" rx="8" fill="#152033" stroke="#2d4a4a"/>
+  <text x="480" y="337" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="600" fill="#5ec4b4">2. transfer peer-to-peer</text>
+
+  <!-- Legend -->
+  <g transform="translate(48, 380)">
+    <line x1="0" y1="0" x2="28" y2="0" stroke="#f0a060" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="36" y="4" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#8b95a8">control / introduction</text>
+    <line x1="220" y1="0" x2="248" y2="0" stroke="#5ec4b4" stroke-width="3"/>
+    <text x="256" y="4" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#8b95a8">encrypted file bytes (TCP, UDP, or relay)</text>
+  </g>
+</svg>

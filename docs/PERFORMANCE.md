@@ -106,6 +106,8 @@ Copies that were removed on the hot path:
 
 ## Loopback measurements
 
+![Loopback throughput chart](images/throughput.svg)
+
 Machine: 4-core Intel Xeon (AES-NI, PCLMULQDQ, AVX2, VAES) running the
 Release build of drop-zone 1.0.0. Loopback only;
 `DROP_ZONE_ALLOW_LOOPBACK=1`. Payload is `/dev/urandom` so the AEAD is

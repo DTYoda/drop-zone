@@ -2,9 +2,21 @@
 
 Send files straight to another person's terminal, wherever they are.
 
+<p align="center">
+  <img src="docs/images/hero-banner.svg" alt="drop-zone: send files peer to peer" width="920"/>
+</p>
+
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="Architecture: rendezvous introduces peers; file bytes travel peer-to-peer" width="920"/>
+</p>
+
 A receiver runs `drop-zone accept`. A sender runs `drop-zone send report.pdf -t alice`. The two machines find each other through a rendezvous server that never sees a password, a filename or a file byte, then transfer the data on the best path they can open: a direct TCP connection, a hole-punched UDP stream, or — only if both of those fail — a relay of ciphertext through the server.
 
 The client is C++20 and meant to be Homebrew-installable; the server is a separate, storage-free daemon an operator runs.
+
+<p align="center">
+  <img src="docs/images/terminal-session.svg" alt="Example sender and receiver terminal session" width="920"/>
+</p>
 
 ## What you get
 
@@ -13,6 +25,10 @@ The client is C++20 and meant to be Homebrew-installable; the server is a separa
 - **Encryption that keeps up.** 1 MiB independently-nonced AEAD chunks, sealed in parallel. AES-256-GCM on CPUs with AES-NI (or FEAT_AES) and carry-less multiply; ChaCha20-Poly1305 otherwise. Chosen at run time, so one Homebrew bottle is fast on every machine it lands on.
 - **Optional plaintext** with `--no-encrypt`, for a network you already trust. Refused on the relay: that path would put the file on the operator's machine.
 - **No server storage.** Usernames live only while their owner is connected. Addresses live only in the kernel's socket state. Core dumps are disabled. Logs never name a peer, an address or a file.
+
+<p align="center">
+  <img src="docs/images/transport-ladder.svg" alt="Transport ladder: direct TCP, hole-punched UDP, then server relay" width="920"/>
+</p>
 
 ## Install the client
 
@@ -84,11 +100,19 @@ A group exists only while at least one member is running `accept --group=NAME`. 
 4. Both peers try a direct TCP connection, then a UDP hole punch, then ask the server to relay. A tier only counts as succeeded once a two-way authenticated handshake has completed over it.
 5. The sender offers a sealed manifest. The receiver confirms. File bytes then travel as 1 MiB chunks.
 
+<p align="center">
+  <img src="docs/images/trust-model.svg" alt="Trust model: what the server learns versus what peers protect" width="920"/>
+</p>
+
 The protocol, the residual risks, and measured throughput are in:
 
 - [docs/PROTOCOL.md](docs/PROTOCOL.md)
 - [docs/SECURITY.md](docs/SECURITY.md)
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+
+<p align="center">
+  <img src="docs/images/throughput.svg" alt="Loopback throughput across transport tiers" width="920"/>
+</p>
 
 ## Run the rendezvous server
 
@@ -124,7 +148,7 @@ common/     framing, sockets, crypto, file I/O, CPU dispatch
 client/     drop-zone: identity, transport ladder, data plane, CLI
 server/     drop-zone-server: sharded event loop, claims, relay
 tests/      unit tests and the loopback e2e script
-docs/       protocol, security, performance
+docs/       protocol, security, performance, README images
 packaging/  Homebrew formula, release checklist, and the client man page
 ```
 
