@@ -1,57 +1,45 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" role="img" aria-labelledby="title desc">
-  <title id="title">drop-zone trust model</title>
-  <desc id="desc">The rendezvous server is untrusted. Peers authenticate each other; file bytes are end-to-end encrypted.</desc>
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0c1220"/>
-      <stop offset="100%" stop-color="#151d2e"/>
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-label="drop-zone trust model">
+  <rect width="960" height="400" rx="16" fill="#0c1220"/>
+  <text x="40" y="42" font-family="Helvetica, Arial, sans-serif" font-size="20" font-weight="700" fill="#f4f1ea">Trust model</text>
+  <text x="40" y="66" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#8b95a8">Authentication is between peers. The server is an untrusted introduction service.</text>
 
-  <rect width="960" height="400" rx="16" fill="url(#bg)"/>
-  <text x="40" y="42" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="20" font-weight="700" fill="#f4f1ea">Trust model</text>
-  <text x="40" y="66" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" fill="#8b95a8">Authentication is between peers. The server is an untrusted introduction service.</text>
-
-  <!-- Server column -->
   <rect x="48" y="100" width="280" height="260" rx="14" fill="#1a1510" stroke="#c07840" stroke-width="1.5"/>
-  <text x="188" y="136" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#f0a060">Server learns</text>
-  <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#c4a882">
-    <text x="72" y="172">" Username (while connected)</text>
-    <text x="72" y="200">" Public keys + candidates</text>
-    <text x="72" y="228">" That a session exists</text>
-  </g>
+  <text x="188" y="136" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#f0a060">Server learns</text>
+  <circle cx="80" cy="168" r="3.5" fill="#c4a882"/>
+  <text x="94" y="172" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#c4a882">Username (while connected)</text>
+  <circle cx="80" cy="196" r="3.5" fill="#c4a882"/>
+  <text x="94" y="200" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#c4a882">Public keys + candidates</text>
+  <circle cx="80" cy="224" r="3.5" fill="#c4a882"/>
+  <text x="94" y="228" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#c4a882">That a session exists</text>
   <line x1="72" y1="250" x2="304" y2="250" stroke="#3a2a1a" stroke-width="1"/>
-  <text x="188" y="280" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#8a7a68">Server never sees</text>
-  <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#6b5d4d">
-    <text x="72" y="312">" Passwords or private keys</text>
-    <text x="72" y="336">" Filenames or file bytes</text>
-  </g>
+  <text x="188" y="280" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#8a7a68">Server never sees</text>
+  <circle cx="80" cy="308" r="3.5" fill="#6b5d4d"/>
+  <text x="94" y="312" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#6b5d4d">Passwords or private keys</text>
+  <circle cx="80" cy="332" r="3.5" fill="#6b5d4d"/>
+  <text x="94" y="336" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#6b5d4d">Filenames or file bytes</text>
 
-  <!-- Peers column -->
   <rect x="360" y="100" width="280" height="260" rx="14" fill="#121a2b" stroke="#3d8f7a" stroke-width="1.5"/>
-  <text x="500" y="136" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#5ec4b4">Peers prove</text>
-  <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#9bb0a8">
-    <text x="384" y="172">" Public-password MAC</text>
-    <text x="384" y="200">" Ed25519 identity (TOFU pin)</text>
-    <text x="384" y="228">" X25519 session keys</text>
-  </g>
+  <text x="500" y="136" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#5ec4b4">Peers prove</text>
+  <circle cx="392" cy="168" r="3.5" fill="#9bb0a8"/>
+  <text x="406" y="172" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9bb0a8">Public-password MAC</text>
+  <circle cx="392" cy="196" r="3.5" fill="#9bb0a8"/>
+  <text x="406" y="200" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9bb0a8">Ed25519 identity (TOFU pin)</text>
+  <circle cx="392" cy="224" r="3.5" fill="#9bb0a8"/>
+  <text x="406" y="228" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9bb0a8">X25519 session keys</text>
   <line x1="384" y1="250" x2="616" y2="250" stroke="#1e3340" stroke-width="1"/>
-  <text x="500" y="280" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#5ec4b4">Payload protection</text>
-  <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#9bb0a8">
-    <text x="384" y="312">" 1 MiB AEAD chunks</text>
-    <text x="384" y="336">" AES-GCM or ChaCha20</text>
-  </g>
+  <text x="500" y="280" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#5ec4b4">Payload protection</text>
+  <circle cx="392" cy="308" r="3.5" fill="#9bb0a8"/>
+  <text x="406" y="312" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9bb0a8">1 MiB AEAD chunks</text>
+  <circle cx="392" cy="332" r="3.5" fill="#9bb0a8"/>
+  <text x="406" y="336" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9bb0a8">AES-GCM or ChaCha20</text>
 
-  <!-- Relay note -->
   <rect x="672" y="100" width="240" height="260" rx="14" fill="#152033" stroke="#4a6fa5" stroke-width="1.5"/>
-  <text x="792" y="136" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#7eb0e0">If relayed</text>
-  <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#9aabbc">
-    <text x="696" y="180">Server forwards</text>
-    <text x="696" y="202">opaque ciphertext.</text>
-    <text x="696" y="240">--no-encrypt is</text>
-    <text x="696" y="262">refused on this</text>
-    <text x="696" y="284">tier so plaintext</text>
-    <text x="696" y="306">never sits on the</text>
-    <text x="696" y="328">operator's machine.</text>
-  </g>
+  <text x="792" y="136" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#7eb0e0">If relayed</text>
+  <text x="696" y="180" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9aabbc">Server forwards</text>
+  <text x="696" y="202" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9aabbc">opaque ciphertext.</text>
+  <text x="696" y="240" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9aabbc">--no-encrypt is</text>
+  <text x="696" y="262" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9aabbc">refused on this</text>
+  <text x="696" y="284" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9aabbc">tier so plaintext</text>
+  <text x="696" y="306" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9aabbc">never sits on the</text>
+  <text x="696" y="328" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#9aabbc">operator's machine.</text>
 </svg>
