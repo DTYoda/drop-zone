@@ -106,7 +106,7 @@ Copies that were removed on the hot path:
 
 ## Loopback measurements
 
-![Loopback throughput chart](images/throughput.svg)
+![Loopback throughput chart](images/throughput.png)
 
 Machine: 4-core Intel Xeon (AES-NI, PCLMULQDQ, AVX2, VAES) running the
 Release build of drop-zone 1.0.0. Loopback only;

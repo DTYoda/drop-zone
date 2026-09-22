@@ -1,54 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 380" role="img" aria-labelledby="title desc">
-  <title id="title">drop-zone loopback throughput</title>
-  <desc id="desc">Measured loopback throughput for 64 MiB transfers across transport tiers with AES-256-GCM.</desc>
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0c1220"/>
-      <stop offset="100%" stop-color="#151d2e"/>
-    </linearGradient>
-    <linearGradient id="barTeal" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#3d8f7a"/>
-      <stop offset="100%" stop-color="#5ec4b4"/>
-    </linearGradient>
-    <linearGradient id="barBlue" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#3a6ea5"/>
-      <stop offset="100%" stop-color="#7eb0e0"/>
-    </linearGradient>
-    <linearGradient id="barAmber" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#c07840"/>
-      <stop offset="100%" stop-color="#f0a060"/>
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="380" viewBox="0 0 960 380" role="img" aria-label="drop-zone loopback throughput">
+  <rect width="960" height="380" rx="16" fill="#0c1220"/>
+  <text x="40" y="42" font-family="Helvetica, Arial, sans-serif" font-size="20" font-weight="700" fill="#f4f1ea">Loopback throughput</text>
+  <text x="40" y="66" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#8b95a8">64 MiB AES-256-GCM - Release build - see docs/PERFORMANCE.md for method and larger runs</text>
 
-  <rect width="960" height="380" rx="16" fill="url(#bg)"/>
-  <text x="40" y="42" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="20" font-weight="700" fill="#f4f1ea">Loopback throughput</text>
-  <text x="40" y="66" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" fill="#8b95a8">64 MiB AES-256-GCM · Release build · see docs/PERFORMANCE.md for method and larger runs</text>
+  <text x="40" y="118" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#c4d0e0">Direct TCP</text>
+  <rect x="200" y="98" width="651" height="28" rx="6" fill="#5ec4b4"/>
+  <text x="860" y="118" text-anchor="end" font-family="Menlo, Consolas, monospace" font-size="13" font-weight="600" fill="#5ec4b4">744 MiB/s</text>
 
-  <!-- Axis scale: max 800 MiB/s, chart width 700 from x=200 -->
-  <!-- TCP 744 -> 744/800*700 = 651 -->
-  <text x="40" y="118" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#c4d0e0">Direct TCP</text>
-  <rect x="200" y="98" width="651" height="28" rx="6" fill="url(#barTeal)"/>
-  <text x="860" y="118" text-anchor="end" font-family="ui-monospace, Menlo, monospace" font-size="13" font-weight="600" fill="#5ec4b4">744 MiB/s</text>
+  <text x="40" y="168" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#c4d0e0">Server relay</text>
+  <rect x="200" y="148" width="609" height="28" rx="6" fill="#f0a060"/>
+  <text x="860" y="168" text-anchor="end" font-family="Menlo, Consolas, monospace" font-size="13" font-weight="600" fill="#f0a060">696 MiB/s</text>
 
-  <!-- Relay 696 -> 609 -->
-  <text x="40" y="168" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#c4d0e0">Server relay</text>
-  <rect x="200" y="148" width="609" height="28" rx="6" fill="url(#barAmber)"/>
-  <text x="860" y="168" text-anchor="end" font-family="ui-monospace, Menlo, monospace" font-size="13" font-weight="600" fill="#f0a060">696 MiB/s</text>
+  <text x="40" y="218" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#c4d0e0">Auto ladder</text>
+  <rect x="200" y="198" width="622" height="28" rx="6" fill="#4aad9c"/>
+  <text x="860" y="218" text-anchor="end" font-family="Menlo, Consolas, monospace" font-size="13" font-weight="600" fill="#5ec4b4">711 MiB/s</text>
 
-  <!-- Auto 711 -> 622 -->
-  <text x="40" y="218" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#c4d0e0">Auto ladder</text>
-  <rect x="200" y="198" width="622" height="28" rx="6" fill="url(#barTeal)" opacity="0.85"/>
-  <text x="860" y="218" text-anchor="end" font-family="ui-monospace, Menlo, monospace" font-size="13" font-weight="600" fill="#5ec4b4">711 MiB/s</text>
+  <text x="40" y="268" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#c4d0e0">Hole-punched UDP</text>
+  <rect x="200" y="248" width="224" height="28" rx="6" fill="#7eb0e0"/>
+  <text x="860" y="268" text-anchor="end" font-family="Menlo, Consolas, monospace" font-size="13" font-weight="600" fill="#7eb0e0">256 MiB/s</text>
 
-  <!-- UDP 256 -> 224 -->
-  <text x="40" y="268" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#c4d0e0">Hole-punched UDP</text>
-  <rect x="200" y="248" width="224" height="28" rx="6" fill="url(#barBlue)"/>
-  <text x="860" y="268" text-anchor="end" font-family="ui-monospace, Menlo, monospace" font-size="13" font-weight="600" fill="#7eb0e0">256 MiB/s</text>
-
-  <text x="200" y="320" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#6b7280">0</text>
-  <text x="550" y="320" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#6b7280">400 MiB/s</text>
-  <text x="900" y="320" text-anchor="end" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#6b7280">800</text>
+  <text x="200" y="320" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">0</text>
+  <text x="550" y="320" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">400 MiB/s</text>
+  <text x="900" y="320" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">800</text>
   <line x1="200" y1="300" x2="900" y2="300" stroke="#2a3348" stroke-width="1"/>
 
-  <text x="40" y="355" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#6b7280">Auto picked direct TCP on this host. Multi-GiB UDP numbers are lower; see the performance doc.</text>
+  <text x="40" y="355" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">Auto picked direct TCP on this host. Multi-GiB UDP numbers are lower; see the performance doc.</text>
 </svg>
