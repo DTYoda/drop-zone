@@ -12,6 +12,7 @@ sources, so the README links the PNG exports.
 
 | File | What it shows |
 | --- | --- |
+| [logo.png](logo.png) | Project mark (arrow into a notched zone) |
 | [hero-banner.png](hero-banner.png) | README header: tagline and compact topology |
 | [architecture.png](architecture.png) | Rendezvous introduction vs peer-to-peer transfer |
 | [terminal-session.png](terminal-session.png) | Stylized sender/receiver terminals from a real transfer |

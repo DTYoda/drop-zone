@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="drop-zone logo">
+  <rect width="512" height="512" rx="96" fill="#0c1220"/>
+
+  <!-- Zone tray: rounded rectangle outline with a V notch on the top edge -->
+  <path
+    fill="none"
+    stroke="#5ec4b4"
+    stroke-width="32"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+    d="M 128 268
+       L 200 268
+       L 256 318
+       L 312 268
+       L 384 268
+       C 412 268, 432 288, 432 316
+       L 432 388
+       C 432 416, 412 436, 384 436
+       L 128 436
+       C 100 436, 80 416, 80 388
+       L 80 316
+       C 80 288, 100 268, 128 268
+       Z"/>
+
+  <!-- Inner landing bar -->
+  <rect x="196" y="360" width="120" height="24" rx="12" fill="#f4f1ea"/>
+
+  <!-- Arrow stem -->
+  <rect x="228" y="72" width="56" height="140" rx="28" fill="#f0a060"/>
+
+  <!-- Arrow head -->
+  <path d="M 170 204 L 256 300 L 342 204 Z" fill="#f4f1ea"/>
+</svg>

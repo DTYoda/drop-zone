@@ -1,5 +1,9 @@
 # drop-zone
 
+<p align="center">
+  <img src="docs/images/logo.png" alt="drop-zone logo" width="160"/>
+</p>
+
 Send files straight to another person's terminal, wherever they are.
 
 <p align="center">
